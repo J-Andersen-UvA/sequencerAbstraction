@@ -23,12 +23,20 @@ public class SequencerAbstraction : ModuleRules
                 "AssetTools",
                 "AssetRegistry",
                 "ContentBrowser",
+
                 "LevelSequence",
                 "MovieScene",
                 "MovieSceneTracks",
+                "MovieSceneTools",
                 "Sequencer",
                 "EditorScriptingUtilities",
                 "LevelSequenceEditor",
+                "SequencerScripting",
+                "SequencerScriptingEditor",
+
+                "RigVM",
+                "ControlRig",
+                "ControlRigEditor",
             });
         }
     }
