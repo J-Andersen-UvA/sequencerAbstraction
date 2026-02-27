@@ -50,6 +50,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Content")
     static UAnimSequence* LoadAnimSequence(const FString& AssetPath);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Content")
+    static TSubclassOf<UControlRig> LoadControlRigClass(const FString& AssetPath);
+
     // Track helpers
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Tracks")
     static bool RemoveTrackInSequenceByTrackPath(
@@ -82,14 +85,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sections")
     static bool MoveAnimationSectionStartTo(
         ULevelSequence* Sequence,
-        UMovieSceneSkeletalAnimationSection* Section,
+        UMovieSceneSection* Section,
         int32 NewStartFrame,
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sections")
     static bool MoveAnimationSectionEndTo(
         ULevelSequence* Sequence,
-        UMovieSceneSkeletalAnimationSection* Section,
+        UMovieSceneSection* Section,
         int32 NewEndFrameInclusive,
         FSequenceOpenResult& Result);
 

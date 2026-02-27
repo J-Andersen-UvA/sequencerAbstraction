@@ -253,6 +253,66 @@ UAnimSequence* USequencerAbstractionBPLibrary::LoadAnimSequence(const FString& A
     return Cast<UAnimSequence>(UEditorAssetLibrary::LoadAsset(AssetPath));
 }
 
+TSubclassOf<UControlRig> USequencerAbstractionBPLibrary::LoadControlRigClass(const FString& AssetPath)
+{
+    if (AssetPath.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    // For Control Rig assets, you must load the GENERATED class
+    // Path format example:
+    // "/Game/Rigs/MyRig.MyRig_C"
+
+    UClass* LoadedClass = LoadObject<UClass>(nullptr, *AssetPath);
+    if (!LoadedClass)
+    {
+        return nullptr;
+    }
+
+    if (!LoadedClass->IsChildOf(UControlRig::StaticClass()))
+    {
+        return nullptr;
+    }
+
+    return LoadedClass;
+}
+
+static USkeletalMeshComponent* ResolveSkelCompFromBinding(const TArray<UObject*>& BoundObjects)
+{
+    for (UObject* Obj : BoundObjects)
+    {
+        if (!Obj) continue;
+
+        // 1) Binding directly to a component
+        if (USkeletalMeshComponent* Comp = Cast<USkeletalMeshComponent>(Obj))
+        {
+            return Comp;
+        }
+
+        // 2) Binding to an actor
+        if (AActor* Actor = Cast<AActor>(Obj))
+        {
+            // SkeletalMeshActor
+            if (ASkeletalMeshActor* SkelActor = Cast<ASkeletalMeshActor>(Actor))
+            {
+                if (USkeletalMeshComponent* Comp = SkelActor->GetSkeletalMeshComponent())
+                {
+                    return Comp;
+                }
+            }
+
+            // Any actor that has a skeletal mesh component
+            if (USkeletalMeshComponent* Comp = Actor->FindComponentByClass<USkeletalMeshComponent>())
+            {
+                return Comp;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 static bool ParseTrackPath(const FString& TrackPath, bool& bOutIsMaster, FGuid& OutGuid, FString& OutTypeName, int32& OutIndex)
 {
     bOutIsMaster = false;
@@ -988,18 +1048,14 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
         return false;
     }
 
-    // ---- Resolve bound SkeletalMeshComponent (same idea as your current version) ----
+    // ---- Resolve bound SkeletalMeshComponent ----
     USkeletalMeshComponent* SkelComp = nullptr;
     {
         UE::MovieScene::FRelativeObjectBindingID RelID(BindingGuid);
         FMovieSceneObjectBindingID BindingID(RelID);
 
         const TArray<UObject*> BoundObjects = ULevelSequenceEditorBlueprintLibrary::GetBoundObjects(BindingID);
-        for (UObject* Obj : BoundObjects)
-        {
-            SkelComp = Cast<USkeletalMeshComponent>(Obj);
-            if (SkelComp) break;
-        }
+        SkelComp = ResolveSkelCompFromBinding(BoundObjects);
     }
 
     if (!SkelComp || !SkelComp->GetSkeletalMeshAsset() || !SkelComp->GetSkeletalMeshAsset()->GetSkeleton())
@@ -1201,7 +1257,7 @@ int32 USequencerAbstractionBPLibrary::RemoveAnimSectionsByAnimSequence(
     UAnimSequenceBase* Animation,
     int32 MaxToRemove,
     FSequenceOpenResult& Result,
-    const FGuid& OptionalBindingGuid)
+    const FGuid& BindingGuid)
 {
     Result = {};
     if (!Sequence || !Animation)
@@ -1261,9 +1317,9 @@ int32 USequencerAbstractionBPLibrary::RemoveAnimSectionsByAnimSequence(
             }
         };
 
-    if (OptionalBindingGuid.IsValid())
+    if (BindingGuid.IsValid())
     {
-        ProcessBinding(OptionalBindingGuid);
+        ProcessBinding(BindingGuid);
     }
     else
     {
@@ -1298,7 +1354,7 @@ static FFrameNumber DisplayFrameToTickFrame(const UMovieScene* MovieScene, int32
 
 bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
     ULevelSequence* Sequence,
-    UMovieSceneSkeletalAnimationSection* Section,
+    UMovieSceneSection* Section,
     int32 NewStartFrame,
     FSequenceOpenResult& Result)
 {
@@ -1348,7 +1404,7 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
 
 bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
     ULevelSequence* Sequence,
-    UMovieSceneSkeletalAnimationSection* Section,
+    UMovieSceneSection* Section,
     int32 NewEndFrameInclusive,
     FSequenceOpenResult& Result)
 {
@@ -1374,23 +1430,36 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
         return false;
     }
 
-    const FFrameNumber StartTick = Range.GetLowerBoundValue();
+    const FFrameNumber OldStart = Range.GetLowerBoundValue();
+    const FFrameNumber OldEndEx = Range.GetUpperBoundValue();
+    const int32 DurationTicks = (OldEndEx - OldStart).Value;
 
-    // convert inclusive display end -> exclusive tick end by using (End+1) display frame
-    const int32 EndExDisplay = NewEndFrameInclusive + 1;
-    FFrameNumber NewEndTickEx = DisplayFrameToTickFrame(MovieScene, EndExDisplay, /*bRoundUp*/ true);
-
-    if (NewEndTickEx <= StartTick)
+    if (DurationTicks <= 0)
     {
-        NewEndTickEx = StartTick + 1;
+        Result.Error = TEXT("Section has invalid duration.");
+        return false;
+    }
+
+    // Convert inclusive display end -> exclusive tick end
+    const int32 NewEndDisplayEx = NewEndFrameInclusive + 1;
+    FFrameNumber NewEndTickEx = DisplayFrameToTickFrame(MovieScene, NewEndDisplayEx, /*bRoundUp*/ true);
+
+    // Preserve duration: NewStart = NewEndEx - Duration
+    FFrameNumber NewStartTick = NewEndTickEx - DurationTicks;
+
+    // Clamp to keep at least 1 tick long if caller gives too small end
+    if (NewStartTick >= NewEndTickEx)
+    {
+        NewStartTick = NewEndTickEx - 1;
     }
 
     MovieScene->Modify();
     Section->Modify();
 
-    Section->SetRange(TRange<FFrameNumber>(StartTick, NewEndTickEx));
+    Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
 
     Sequence->MarkPackageDirty();
     Result.bSuccess = true;
     return true;
+
 }
