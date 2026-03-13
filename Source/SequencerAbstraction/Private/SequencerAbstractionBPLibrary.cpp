@@ -23,6 +23,9 @@
 #include "MovieSceneBindingProxy.h"
 #include "ControlRigSequencerEditorLibrary.h"
 #include "MovieSceneObjectBindingID.h" // UE::MovieScene::FRelativeObjectBindingID, FMovieSceneObjectBindingID
+#include "MovieScenePossessable.h"
+#include "MovieSceneSpawnable.h"
+#include "Channels/MovieSceneBoolChannel.h"
 
 #include "Exporters/AnimSeqExportOption.h"
 #include "Animation/AnimationSettings.h"
@@ -135,6 +138,40 @@ bool USequencerAbstractionBPLibrary::OpenLevelSequenceInSequencer(ULevelSequence
     return ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence);
 }
 
+ULevelSequence* USequencerAbstractionBPLibrary::duplicateSequencerToFolder(
+    const FString& sourceSequencePath,
+    const FString& destinationFolder,
+    const FString& newSequenceName
+)
+{
+#if !WITH_EDITOR
+    return nullptr;
+#else
+
+    if (!UEditorAssetLibrary::DoesAssetExist(sourceSequencePath))
+    {
+        return nullptr;
+    }
+
+    if (!UEditorAssetLibrary::DoesDirectoryExist(destinationFolder))
+    {
+        UEditorAssetLibrary::MakeDirectory(destinationFolder);
+    }
+
+    FString newAssetPath = destinationFolder + TEXT("/") + newSequenceName;
+
+    UObject* duplicated = UEditorAssetLibrary::DuplicateAsset(sourceSequencePath, newAssetPath);
+
+    if (!duplicated)
+    {
+        return nullptr;
+    }
+
+    return Cast<ULevelSequence>(duplicated);
+
+#endif
+}
+
 static void FillSections(UMovieSceneTrack* Track, FSequenceTrackInfo& Info)
 {
     Info.Sections.Reset();
@@ -238,6 +275,68 @@ TArray<FSequenceTrackInfo> USequencerAbstractionBPLibrary::GetAllTracksInCurrent
 
             Out.Add(Info);
         }
+    }
+
+    return Out;
+}
+
+TArray<FSequenceBindingInfo> USequencerAbstractionBPLibrary::GetBindingsInSequence(ULevelSequence* Sequence)
+{
+    TArray<FSequenceBindingInfo> Out;
+
+    if (!Sequence)
+    {
+        return Out;
+    }
+
+    const UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        return Out;
+    }
+
+    const TArray<FMovieSceneBinding>& Bindings = MovieScene->GetBindings();
+    Out.Reserve(Bindings.Num());
+    UMovieScene* MovieSceneMutable = const_cast<UMovieScene*>(MovieScene);
+
+    for (const FMovieSceneBinding& Binding : Bindings)
+    {
+        const FGuid Guid = Binding.GetObjectGuid();
+
+        FSequenceBindingInfo Info;
+        Info.BindingGuid = Guid;
+        Info.ObjectBindingId = FMovieSceneObjectBindingID(Guid);
+        Info.TrackCount = Binding.GetTracks().Num();
+
+        if (FMovieSceneSpawnable* Spawnable = MovieSceneMutable->FindSpawnable(Guid))
+        {
+            Info.bIsSpawnable = true;
+            Info.DisplayName = Spawnable->GetName();
+
+            UObject* TemplateObj = Spawnable->GetObjectTemplate();
+            if (TemplateObj)
+            {
+                Info.BoundObjectClass = TemplateObj->GetClass()->GetName();
+            }
+        }
+        else if (FMovieScenePossessable* Possessable = MovieSceneMutable->FindPossessable(Guid))
+        {
+            Info.bIsPossessable = true;
+            Info.DisplayName = Possessable->GetName();
+
+            const UClass* ObjClass = Possessable->GetPossessedObjectClass();
+            if (ObjClass)
+            {
+                Info.BoundObjectClass = ObjClass->GetName();
+            }
+        }
+        else
+        {
+            // Fallback: if neither spawnable nor possessable resolves, keep something stable
+            Info.DisplayName = Guid.ToString();
+        }
+
+        Out.Add(Info);
     }
 
     return Out;
@@ -471,7 +570,7 @@ int32 USequencerAbstractionBPLibrary::RemoveTracksInSequenceByBindingGuid(
 
     MovieScene->Modify();
 
-    // Copy pointers first (we’re going to remove while iterating)
+    // Copy pointers first (weï¿½re going to remove while iterating)
     TArray<UMovieSceneTrack*> TracksToRemove;
     {
         const TArray<UMovieSceneTrack*>& Tracks = Binding->GetTracks();
@@ -586,6 +685,19 @@ static AActor* FindActorByLabelOrName(UWorld* World, const FName LabelOrName)
     return nullptr;
 }
 
+void USequencerAbstractionBPLibrary::moveSequencerPlayheadToFrame(int32 frame)
+{
+    FMovieSceneSequencePlaybackParams playbackParams;
+    playbackParams.Frame = FFrameTime(frame);
+
+    ULevelSequenceEditorBlueprintLibrary::SetLocalPosition(
+        playbackParams,
+        EMovieSceneTimeUnit::DisplayRate
+    );
+
+    ULevelSequenceEditorBlueprintLibrary::ForceUpdate();
+}
+
 bool USequencerAbstractionBPLibrary::SetSequencePlaybackRange(
     ULevelSequence* Sequence,
     int32 StartFrame,
@@ -621,7 +733,7 @@ bool USequencerAbstractionBPLibrary::SetSequencePlaybackRange(
 
     MovieScene->SetPlaybackRange(StartTickFrame, DurationTicks, /*bAlwaysMarkDirty*/ true);
 
-    // UI “outer” range is seconds and is typically inclusive-looking; use exact frame boundaries.
+    // UI ï¿½outerï¿½ range is seconds and is typically inclusive-looking; use exact frame boundaries.
     const double StartSeconds = DisplayRate.AsSeconds(FFrameNumber(StartFrame));
     const double EndSeconds = DisplayRate.AsSeconds(FFrameNumber(EndFrame)); // exclusive in seconds
     MovieScene->SetWorkingRange(StartSeconds, EndSeconds);
@@ -1203,6 +1315,16 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
 #endif // WITH_EDITOR
 }
 
+//void USequencerAbstractionBPLibrary::SetTrackDisplayName(UMovieSceneTrack* track, const FString& newName)
+//{
+//    if (!track)
+//    {
+//        return;
+//    }
+//    track->name
+//    track->SetDisplayName(FText::FromString(newName));
+//}
+
 bool USequencerAbstractionBPLibrary::RemoveAnimSection(
     ULevelSequence* Sequence,
     UMovieSceneSkeletalAnimationSection* Section,
@@ -1462,4 +1584,182 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
     Result.bSuccess = true;
     return true;
 
+}
+
+bool USequencerAbstractionBPLibrary::RemoveAllKeysForControlExceptFrame(
+    UMovieSceneControlRigParameterTrack* Track,
+    FName ControlName,
+    int32 KeepFrame,
+    FString& ErrorMessage)
+{
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only function.");
+    return false;
+#else
+    ErrorMessage.Empty();
+
+    if (!Track)
+    {
+        ErrorMessage = TEXT("Track is null.");
+        return false;
+    }
+
+    UMovieSceneSection* RawSection = Track->GetSectionToKey(ControlName);
+    if (!RawSection)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("Could not find section for control '%s'."),
+            *ControlName.ToString());
+        return false;
+    }
+
+    UMovieSceneControlRigParameterSection* Section =
+        Cast<UMovieSceneControlRigParameterSection>(RawSection);
+    if (!Section)
+    {
+        ErrorMessage = TEXT("Section is not a UMovieSceneControlRigParameterSection.");
+        return false;
+    }
+
+    Section->Modify();
+    Track->Modify();
+
+    TArray<FBoolParameterNameAndCurve>& BoolParams = Section->GetBoolParameterNamesAndCurves();
+
+    FBoolParameterNameAndCurve* MatchingParam = nullptr;
+    for (FBoolParameterNameAndCurve& Param : BoolParams)
+    {
+        if (Param.ParameterName == ControlName)
+        {
+            MatchingParam = &Param;
+            break;
+        }
+    }
+
+    if (!MatchingParam)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("No bool parameter found for control '%s'."),
+            *ControlName.ToString());
+        return false;
+    }
+
+    FMovieSceneBoolChannel& Channel = MatchingParam->ParameterCurve;
+
+    TArray<FFrameNumber> KeyTimes;
+    TArray<FKeyHandle> KeyHandles;
+    Channel.GetKeys(TRange<FFrameNumber>::All(), &KeyTimes, &KeyHandles);
+
+    const FFrameNumber KeepFrameNumber(KeepFrame);
+
+    TArray<FKeyHandle> HandlesToDelete;
+    HandlesToDelete.Reserve(KeyHandles.Num());
+
+    for (int32 KeyIndex = 0; KeyIndex < KeyHandles.Num(); ++KeyIndex)
+    {
+        if (KeyTimes.IsValidIndex(KeyIndex) && KeyTimes[KeyIndex] != KeepFrameNumber)
+        {
+            HandlesToDelete.Add(KeyHandles[KeyIndex]);
+        }
+    }
+
+    if (HandlesToDelete.Num() > 0)
+    {
+        Channel.DeleteKeys(HandlesToDelete);
+    }
+
+    // Helps editor state/undo update cleanly
+    Section->MarkAsChanged();
+    if (UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>())
+    {
+        MovieScene->Modify();
+    }
+
+    ErrorMessage = FString::Printf(
+        TEXT("Deleted %d keys for '%s'."),
+        HandlesToDelete.Num(),
+        *ControlName.ToString());
+
+    return true;
+#endif
+}
+
+UMovieSceneTrack* USequencerAbstractionBPLibrary::GetTrackFromGuid(
+    ULevelSequence* Sequence,
+    FGuid BindingGuid,
+    TSubclassOf<UMovieSceneTrack> TrackClass,
+    FString& ErrorMessage)
+{
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only.");
+    return nullptr;
+#else
+
+    ErrorMessage.Empty();
+
+    if (!Sequence)
+    {
+        ErrorMessage = TEXT("Sequence is null.");
+        return nullptr;
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+
+    if (!MovieScene)
+    {
+        ErrorMessage = TEXT("MovieScene is null.");
+        return nullptr;
+    }
+
+    const FMovieSceneBinding* Binding = MovieScene->FindBinding(BindingGuid);
+
+    if (!Binding)
+    {
+        ErrorMessage = TEXT("Binding GUID not found.");
+        return nullptr;
+    }
+
+    const TArray<UMovieSceneTrack*>& Tracks = Binding->GetTracks();
+
+    for (UMovieSceneTrack* Track : Tracks)
+    {
+        if (!Track)
+        {
+            continue;
+        }
+
+        if (!TrackClass || Track->IsA(TrackClass))
+        {
+            return Track;
+        }
+    }
+
+    ErrorMessage = TEXT("No matching track found.");
+    return nullptr;
+
+#endif
+}
+
+int32 USequencerAbstractionBPLibrary::GetCurrentFrame(FString& ErrorMessage)
+{
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only.");
+    return 0;
+#else
+
+    ErrorMessage.Empty();
+
+    ULevelSequence* Sequence = USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence();
+
+    if (!Sequence)
+    {
+        ErrorMessage = TEXT("No Level Sequence is currently opened.");
+        return 0;
+    }
+
+    FFrameTime FrameTime = ULevelSequenceEditorBlueprintLibrary::GetCurrentTime();
+
+    return FrameTime.FrameNumber.Value;
+
+#endif
 }

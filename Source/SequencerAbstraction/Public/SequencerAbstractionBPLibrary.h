@@ -26,7 +26,17 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Assets")
     static ULevelSequence* LoadLevelSequenceAsset(const FString& AssetPath);
 
+    UFUNCTION(BlueprintCallable, Category="SequencerAbstraction|Assets")
+    static ULevelSequence* duplicateSequencerToFolder(
+        const FString& sourceSequencePath,
+        const FString& destinationFolder,
+        const FString& newSequenceName
+    );
+
     // Sequencer state
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static TArray<FSequenceBindingInfo> GetBindingsInSequence(ULevelSequence* Sequence);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static ULevelSequence* GetCurrentOpenedLevelSequence();
 
@@ -42,6 +52,16 @@ public:
         const FString& SkeletalMeshAssetPath,
         const FName SpawnedActorLabel,
         FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static UMovieSceneTrack* GetTrackFromGuid(
+        ULevelSequence* Sequence,
+        FGuid BindingGuid,
+        TSubclassOf<UMovieSceneTrack> TrackClass,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static int32 GetCurrentFrame(FString& ErrorMessage);
 
     // Content loading
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Content")
@@ -68,6 +88,9 @@ public:
         FSequenceOpenResult& Result);
 
     // Sections
+    //UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Track")
+    //static void SetTrackDisplayName(UMovieSceneSection* section, const FString& newName);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sections")
     static bool RemoveAnimSection(
         ULevelSequence* Sequence,
@@ -97,6 +120,9 @@ public:
         FSequenceOpenResult& Result);
 
     // Timing helpers
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Timing")
+    static void moveSequencerPlayheadToFrame(int32 frame);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Timing")
     static bool SetSequenceFrameRateFromAnimation(
         ULevelSequence* Sequence,
@@ -156,4 +182,12 @@ public:
         const FString& TargetPackagePath,
         const FString& NewAssetName,
         FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
+    static bool RemoveAllKeysForControlExceptFrame(
+        UMovieSceneControlRigParameterTrack* track,
+        FName controlName,
+        int32 keepFrame,
+        FString& errorMessage);
+
 };

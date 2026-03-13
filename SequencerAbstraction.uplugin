@@ -10,5 +10,27 @@
             "Name": "SequencerAbstraction",
             "Type": "Editor"
         }
+    ],
+    "Plugins": [
+        {
+            "Name": "EditorScriptingUtilities",
+            "Enabled": true
+        },
+        {
+            "Name": "LevelSequenceEditor",
+            "Enabled": true
+        },
+        {
+            "Name": "SequencerScripting",
+            "Enabled": true
+        },
+        {
+            "Name": "RigVM",
+            "Enabled": true
+        },
+        {
+            "Name": "ControlRig",
+            "Enabled": true
+        }
     ]
 }

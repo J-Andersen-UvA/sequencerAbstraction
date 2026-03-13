@@ -8,6 +8,22 @@ class UMovieSceneSection;
 class UAnimSequenceBase;
 
 USTRUCT(BlueprintType)
+struct FSequenceBindingInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly) FString DisplayName;      // Sequencer outliner label
+    UPROPERTY(BlueprintReadOnly) FGuid BindingGuid;
+    UPROPERTY(BlueprintReadOnly) FMovieSceneObjectBindingID ObjectBindingId;
+
+    UPROPERTY(BlueprintReadOnly) bool bIsSpawnable = false;
+    UPROPERTY(BlueprintReadOnly) bool bIsPossessable = false;
+
+    UPROPERTY(BlueprintReadOnly) FString BoundObjectClass; // Actor/Component class (if known)
+    UPROPERTY(BlueprintReadOnly) int32 TrackCount = 0;     // Tracks directly under this binding
+};
+
+USTRUCT(BlueprintType)
 struct FSequenceSectionInfo
 {
     GENERATED_BODY()
