@@ -1763,3 +1763,36 @@ int32 USequencerAbstractionBPLibrary::GetCurrentFrame(FString& ErrorMessage)
 
 #endif
 }
+
+bool USequencerAbstractionBPLibrary::FocusLevelSequenceEditor(ULevelSequence* Sequence)
+{
+#if !WITH_EDITOR
+    return false;
+#else
+    if (!Sequence || !GEditor)
+    {
+        return false;
+    }
+
+    UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+    if (!EditorSubsystem)
+    {
+        return false;
+    }
+
+    IAssetEditorInstance* EditorInstance = EditorSubsystem->FindEditorForAsset(Sequence, false);
+    if (!EditorInstance)
+    {
+        EditorSubsystem->OpenEditorForAsset(Sequence);
+        EditorInstance = EditorSubsystem->FindEditorForAsset(Sequence, false);
+    }
+
+    if (!EditorInstance)
+    {
+        return false;
+    }
+
+    EditorInstance->FocusWindow(Sequence);
+    return true;
+#endif
+}

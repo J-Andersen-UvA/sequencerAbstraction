@@ -63,6 +63,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static int32 GetCurrentFrame(FString& ErrorMessage);
 
+    UFUNCTION(BlueprintCallable, Category="SequencerAbstraction|Sequencer")
+    bool FocusLevelSequenceEditor(ULevelSequence* Sequence);
+
     // Content loading
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Content")
     static USkeletalMesh* LoadSkeletalMesh(const FString& AssetPath);
