@@ -37,6 +37,10 @@ public class SequencerAbstraction : ModuleRules
                 "RigVM",
                 "ControlRig",
                 "ControlRigEditor",
+
+                "LevelEditor",
+                "Slate",
+                "SlateCore",
             });
         }
     }

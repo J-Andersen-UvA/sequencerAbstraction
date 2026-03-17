@@ -64,7 +64,10 @@ public:
     static int32 GetCurrentFrame(FString& ErrorMessage);
 
     UFUNCTION(BlueprintCallable, Category="SequencerAbstraction|Sequencer")
-    bool FocusLevelSequenceEditor(ULevelSequence* Sequence);
+    static bool FocusLevelSequenceEditor(ULevelSequence* Sequence);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Editor")
+    static bool FocusLevelViewport();
 
     // Content loading
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Content")

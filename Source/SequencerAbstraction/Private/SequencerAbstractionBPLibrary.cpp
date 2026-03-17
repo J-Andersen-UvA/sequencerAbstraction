@@ -27,6 +27,12 @@
 #include "MovieSceneSpawnable.h"
 #include "Channels/MovieSceneBoolChannel.h"
 
+#include "LevelEditor.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SWidget.h"
+#include "Modules/ModuleManager.h"
+#include "IAssetViewport.h"
+
 #include "Exporters/AnimSeqExportOption.h"
 #include "Animation/AnimationSettings.h"
 #include "Animation/AnimSequence.h"
@@ -1794,5 +1800,30 @@ bool USequencerAbstractionBPLibrary::FocusLevelSequenceEditor(ULevelSequence* Se
 
     EditorInstance->FocusWindow(Sequence);
     return true;
+#endif
+}
+
+bool USequencerAbstractionBPLibrary::FocusLevelViewport()
+{
+#if !WITH_EDITOR
+    return false;
+#else
+    if (!FSlateApplication::IsInitialized())
+    {
+        return false;
+    }
+
+    FLevelEditorModule& levelEditorModule =
+        FModuleManager::LoadModuleChecked<FLevelEditorModule>("LevelEditor");
+
+    TSharedPtr<IAssetViewport> activeViewport = levelEditorModule.GetFirstActiveViewport();
+    if (!activeViewport.IsValid())
+    {
+        return false;
+    }
+
+    TSharedRef<SWidget> viewportWidget = activeViewport->AsWidget();
+
+    return FSlateApplication::Get().SetKeyboardFocus(viewportWidget, EFocusCause::SetDirectly);
 #endif
 }
