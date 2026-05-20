@@ -290,6 +290,33 @@ TArray<FSequenceTrackInfo> USequencerAbstractionBPLibrary::GetAllTracksInCurrent
     return Out;
 }
 
+TArray<UAnimSequence*> USequencerAbstractionBPLibrary::GetAllAnimSequencesInCurrentSequence()
+{
+    TArray<UAnimSequence*> Out;
+
+    TArray<FSequenceTrackInfo> Tracks = USequencerAbstractionBPLibrary::GetAllTracksInCurrentSequence();
+    int32 NumTracks = Tracks.Num();
+
+    for (int32 i=0; i < NumTracks; i++)
+    {
+        TArray<FSequenceSectionInfo> Sections = Tracks[i].Sections;
+        int32 NumSections = Sections.Num();
+
+        for (int32 j=0; j < NumSections; j++)
+        {
+            UMovieSceneSection* Section = Sections[j].Section;
+            UMovieSceneSkeletalAnimationSection* AnimSection = Cast<UMovieSceneSkeletalAnimationSection>(Section);
+            if (!AnimSection) continue;
+
+            UAnimSequence* AnimSeq = Cast<UAnimSequence>(AnimSection->Params.Animation);
+
+            Out.Add(AnimSeq);
+        }
+    }
+
+    return Out;
+}
+
 TArray<FSequenceBindingInfo> USequencerAbstractionBPLibrary::GetBindingsInSequence(ULevelSequence* Sequence)
 {
     TArray<FSequenceBindingInfo> Out;
