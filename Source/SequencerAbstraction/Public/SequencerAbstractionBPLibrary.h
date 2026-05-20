@@ -44,6 +44,9 @@ public:
     static TArray<FSequenceTrackInfo> GetAllTracksInCurrentSequence();
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static TArray<UAnimSequence*> GetAllAnimSequencesInCurrentSequence();
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static bool OpenLevelSequenceInSequencer(ULevelSequence* Sequence);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
