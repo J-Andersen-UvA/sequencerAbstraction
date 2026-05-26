@@ -26,6 +26,10 @@
 #include "MovieScenePossessable.h"
 #include "MovieSceneSpawnable.h"
 #include "Channels/MovieSceneBoolChannel.h"
+#include "LevelSequenceEditorSubsystem.h"
+#include "MediaSource.h"
+#include "MovieSceneMediaSection.h"
+#include "MovieSceneMediaTrack.h"
 
 #include "LevelEditor.h"
 #include "Framework/Application/SlateApplication.h"
@@ -905,7 +909,9 @@ FGuid USequencerAbstractionBPLibrary::AddSkeletalMeshToOpenSequenceFromPath(
     return BindingGuid;
 }
 
-static void NotifySequencerMovieSceneChanged(ULevelSequence* Sequence)
+static void NotifySequencerMovieSceneChanged(
+    ULevelSequence* Sequence,
+    EMovieSceneDataChangeType ChangeType = EMovieSceneDataChangeType::MovieSceneStructureItemAdded)
 {
 #if WITH_EDITOR
     if (!Sequence || !GEditor) return;
@@ -918,13 +924,140 @@ static void NotifySequencerMovieSceneChanged(ULevelSequence* Sequence)
             {
                 if (TSharedPtr<ISequencer> Seq = Toolkit->GetSequencer())
                 {
-                    Seq->NotifyMovieSceneDataChanged(EMovieSceneDataChangeType::MovieSceneStructureItemAdded);
+                    Seq->NotifyMovieSceneDataChanged(ChangeType);
                     Seq->ForceEvaluate();
                 }
             }
         }
     }
 #endif
+}
+
+static void FocusMovieSceneOnSection(UMovieScene* MovieScene, UMovieSceneSection* Section, float PaddingSeconds = 0.4f)
+{
+    if (!MovieScene || !Section || !Section->HasStartFrame() || !Section->HasEndFrame())
+    {
+        return;
+    }
+
+    MovieScene->SetPlaybackRangeLocked(false);
+
+    const FFrameNumber StartTick = Section->GetInclusiveStartFrame();
+    const FFrameNumber EndTick = FMath::Max(StartTick + 1, Section->GetExclusiveEndFrame() - 1);
+    MovieScene->SetPlaybackRange(TRange<FFrameNumber>::Inclusive(StartTick, EndTick));
+
+    const FFrameRate TickResolution = MovieScene->GetTickResolution();
+    const double StartSeconds = TickResolution.AsSeconds(FFrameTime(StartTick));
+    const double EndSeconds = TickResolution.AsSeconds(FFrameTime(EndTick));
+    MovieScene->SetWorkingRange(StartSeconds - PaddingSeconds, EndSeconds + PaddingSeconds);
+    MovieScene->SetViewRange(StartSeconds - PaddingSeconds, EndSeconds + PaddingSeconds);
+}
+
+FGuid USequencerAbstractionBPLibrary::FindOrCreatePossessableBinding(
+    ULevelSequence* Sequence,
+    AActor* Actor,
+    FSequenceOpenResult& Result)
+{
+    Result = {};
+
+    if (!Sequence || !Actor)
+    {
+        Result.Error = TEXT("Sequence or Actor is null.");
+        return FGuid();
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        Result.Error = TEXT("Sequence has no MovieScene.");
+        return FGuid();
+    }
+
+    const FString ActorLabel = Actor->GetActorLabel();
+    const UClass* ActorClass = Actor->GetClass();
+
+    for (const FMovieSceneBinding& Binding : static_cast<const UMovieScene*>(MovieScene)->GetBindings())
+    {
+        FMovieScenePossessable* Possessable = MovieScene->FindPossessable(Binding.GetObjectGuid());
+        if (Possessable &&
+            Possessable->GetName() == ActorLabel &&
+            Possessable->GetPossessedObjectClass() == ActorClass)
+        {
+            if (UWorld* World = Actor->GetWorld())
+            {
+                Sequence->BindPossessableObject(Binding.GetObjectGuid(), *Actor, World);
+            }
+
+            Result.bSuccess = true;
+            return Binding.GetObjectGuid();
+        }
+    }
+
+    UWorld* World = Actor->GetWorld();
+    if (!World)
+    {
+        Result.Error = TEXT("Actor has no valid World.");
+        return FGuid();
+    }
+
+    const FGuid BindingGuid = MovieScene->AddPossessable(ActorLabel, Actor->GetClass());
+    Sequence->BindPossessableObject(BindingGuid, *Actor, World);
+    MovieScene->Modify();
+    Sequence->MarkPackageDirty();
+    NotifySequencerMovieSceneChanged(Sequence);
+
+    Result.bSuccess = BindingGuid.IsValid();
+    if (!Result.bSuccess)
+    {
+        Result.Error = TEXT("Failed to create possessable binding.");
+    }
+    return BindingGuid;
+}
+
+bool USequencerAbstractionBPLibrary::SnapSectionToSourceTimecode(
+    ULevelSequence* Sequence,
+    UMovieSceneSection* Section,
+    bool bFocusSection,
+    FSequenceOpenResult& Result)
+{
+    Result = {};
+
+    if (!Sequence || !Section)
+    {
+        Result.Error = TEXT("Sequence or Section is null.");
+        return false;
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        Result.Error = TEXT("Sequence has no MovieScene.");
+        return false;
+    }
+
+    if (!GEditor)
+    {
+        Result.Error = TEXT("GEditor is not available.");
+        return false;
+    }
+
+    ULevelSequenceEditorSubsystem* LevelSequenceEditorSubsystem =
+        GEditor->GetEditorSubsystem<ULevelSequenceEditorSubsystem>();
+    if (!LevelSequenceEditorSubsystem)
+    {
+        Result.Error = TEXT("LevelSequenceEditorSubsystem is not available.");
+        return false;
+    }
+
+    LevelSequenceEditorSubsystem->SnapSectionsToTimelineUsingSourceTimecode({ Section });
+    if (bFocusSection)
+    {
+        FocusMovieSceneOnSection(MovieScene, Section);
+    }
+    NotifySequencerMovieSceneChanged(Sequence, EMovieSceneDataChangeType::TrackValueChanged);
+
+    Result.bSuccess = true;
+    return true;
 }
 static int32 PickRowIndexForRange(
     const UMovieSceneSkeletalAnimationTrack* Track,
@@ -1078,6 +1211,84 @@ UMovieSceneSkeletalAnimationSection* USequencerAbstractionBPLibrary::AddAnimSect
     Track->MarkAsChanged();
 
     Sequence->MarkPackageDirty();
+    Result.bSuccess = true;
+    return Section;
+}
+
+UMovieSceneSection* USequencerAbstractionBPLibrary::AddMediaSourceProxySectionToBinding(
+    ULevelSequence* Sequence,
+    const FGuid& BindingGuid,
+    UMediaSource* MediaSource,
+    int32 StartFrame,
+    int32 MediaSourceProxyIndex,
+    FSequenceOpenResult& Result)
+{
+    Result = {};
+
+    if (!Sequence || !BindingGuid.IsValid() || !MediaSource)
+    {
+        Result.Error = TEXT("Invalid inputs (Sequence / BindingGuid / MediaSource).");
+        return nullptr;
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        Result.Error = TEXT("Sequence has no MovieScene.");
+        return nullptr;
+    }
+
+    if (!MovieScene->FindBinding(BindingGuid))
+    {
+        Result.Error = TEXT("BindingGuid not found in MovieScene.");
+        return nullptr;
+    }
+
+    MovieScene->Modify();
+    Sequence->Modify();
+
+    UMovieSceneMediaTrack* MediaTrack = MovieScene->FindTrack<UMovieSceneMediaTrack>(BindingGuid);
+    if (!MediaTrack)
+    {
+        MediaTrack = MovieScene->AddTrack<UMovieSceneMediaTrack>(BindingGuid);
+        if (MediaTrack)
+        {
+            MediaTrack->SetDisplayName(FText::FromString(TEXT("Media")));
+        }
+    }
+
+    if (!MediaTrack)
+    {
+        Result.Error = TEXT("Failed to create/get media track.");
+        return nullptr;
+    }
+
+    MediaTrack->Modify();
+
+    const FMovieSceneObjectBindingID ObjectBindingID{
+        UE::MovieScene::FRelativeObjectBindingID(BindingGuid)
+    };
+    UMovieSceneSection* Section = MediaTrack->AddNewMediaSourceProxy(
+        MediaSource,
+        ObjectBindingID,
+        MediaSourceProxyIndex,
+        FFrameNumber(StartFrame));
+
+    if (!Section)
+    {
+        Result.Error = TEXT("Failed to create media section.");
+        return nullptr;
+    }
+
+    if (UMovieSceneMediaSection* MediaSection = Cast<UMovieSceneMediaSection>(Section))
+    {
+        MediaSection->bHasMediaPlayerProxy = true;
+    }
+
+    MediaTrack->MarkAsChanged();
+    Sequence->MarkPackageDirty();
+    NotifySequencerMovieSceneChanged(Sequence);
+
     Result.bSuccess = true;
     return Section;
 }

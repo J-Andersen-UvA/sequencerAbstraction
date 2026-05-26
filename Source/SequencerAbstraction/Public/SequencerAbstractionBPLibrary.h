@@ -4,11 +4,13 @@
 #include "LevelSequence.h"
 #include "Animation/AnimSequence.h"
 #include "Engine/SkeletalMesh.h"
+#include "MediaSource.h"
 #include "SequencerTypes.h"
 
 #include "SequencerAbstractionBPLibrary.generated.h"
 
 class UControlRig;
+class AActor;
 
 UCLASS()
 class SEQUENCERABSTRACTION_API USequencerAbstractionBPLibrary : public UBlueprintFunctionLibrary
@@ -51,6 +53,12 @@ public:
         UObject* WorldContextObject,
         const FString& SkeletalMeshAssetPath,
         const FName SpawnedActorLabel,
+        FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static FGuid FindOrCreatePossessableBinding(
+        ULevelSequence* Sequence,
+        AActor* Actor,
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
@@ -125,6 +133,13 @@ public:
         int32 NewEndFrameInclusive,
         FSequenceOpenResult& Result);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sections")
+    static bool SnapSectionToSourceTimecode(
+        ULevelSequence* Sequence,
+        UMovieSceneSection* Section,
+        bool bFocusSection,
+        FSequenceOpenResult& Result);
+
     // Timing helpers
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Timing")
     static void moveSequencerPlayheadToFrame(int32 frame);
@@ -169,6 +184,15 @@ public:
         int32 StartFrame,
         int32 RowIndex,
         bool bAllowOverlapSameRow,
+        FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Media")
+    static UMovieSceneSection* AddMediaSourceProxySectionToBinding(
+        ULevelSequence* Sequence,
+        const FGuid& BindingGuid,
+        UMediaSource* MediaSource,
+        int32 StartFrame,
+        int32 MediaSourceProxyIndex,
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")

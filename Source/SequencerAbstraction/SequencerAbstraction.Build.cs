@@ -13,6 +13,7 @@ public class SequencerAbstraction : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
+            "MediaAssets",
         });
 
         if (Target.bBuildEditor)
@@ -28,6 +29,7 @@ public class SequencerAbstraction : ModuleRules
                 "MovieScene",
                 "MovieSceneTracks",
                 "MovieSceneTools",
+                "MediaCompositing",
                 "Sequencer",
                 "EditorScriptingUtilities",
                 "LevelSequenceEditor",
