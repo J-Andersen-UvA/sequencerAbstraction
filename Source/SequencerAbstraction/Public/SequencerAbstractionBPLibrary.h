@@ -187,6 +187,12 @@ public:
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Media")
+    static int32 RemoveMediaTracksFromBinding(
+        ULevelSequence* Sequence,
+        const FGuid& BindingGuid,
+        FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Media")
     static UMovieSceneSection* AddMediaSourceProxySectionToBinding(
         ULevelSequence* Sequence,
         const FGuid& BindingGuid,

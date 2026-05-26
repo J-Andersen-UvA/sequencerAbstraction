@@ -1293,6 +1293,18 @@ UMovieSceneSection* USequencerAbstractionBPLibrary::AddMediaSourceProxySectionTo
     return Section;
 }
 
+int32 USequencerAbstractionBPLibrary::RemoveMediaTracksFromBinding(
+    ULevelSequence* Sequence,
+    const FGuid& BindingGuid,
+    FSequenceOpenResult& Result)
+{
+    return RemoveTracksInSequenceByBindingGuid(
+        Sequence,
+        BindingGuid,
+        UMovieSceneMediaTrack::StaticClass()->GetName(),
+        Result);
+}
+
 bool USequencerAbstractionBPLibrary::AddRigToBinding(
     ULevelSequence* Sequence,
     UObject* WorldContextObject,
