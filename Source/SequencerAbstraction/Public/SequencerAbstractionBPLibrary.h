@@ -6,10 +6,12 @@
 #include "Engine/SkeletalMesh.h"
 #include "MediaSource.h"
 #include "SequencerTypes.h"
+#include "ControlRigSequencerEditorLibrary.h"
 
 #include "SequencerAbstractionBPLibrary.generated.h"
 
 class UControlRig;
+class UMovieSceneScriptingChannel;
 class AActor;
 
 UCLASS()
@@ -41,6 +43,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static ULevelSequence* GetCurrentOpenedLevelSequence();
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
+    static FControlRigSequencerBindingProxy GetRigBindingProxyBasedOnClassFromOpenSequence(TSubclassOf<UControlRig> InClass);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static TArray<FSequenceTrackInfo> GetAllTracksInCurrentSequence();
@@ -212,6 +217,9 @@ public:
         TSubclassOf<UControlRig> ControlRigClass,
         bool bLayered,
         FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
+    static TArray<UMovieSceneScriptingChannel*> GetAllChannelsFromRigBindingSequenceTrack(UMovieSceneTrack* Track);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Bake")
     static bool BakeBindingToAnimSequence(

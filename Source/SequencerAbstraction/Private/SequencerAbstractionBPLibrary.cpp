@@ -27,6 +27,7 @@
 #include "MovieSceneSpawnable.h"
 #include "Channels/MovieSceneBoolChannel.h"
 #include "LevelSequenceEditorSubsystem.h"
+#include "ExtensionLibraries/MovieSceneSectionExtensions.h"
 #include "MediaSource.h"
 #include "MovieSceneMediaSection.h"
 #include "MovieSceneMediaTrack.h"
@@ -44,7 +45,6 @@
 
 #include "Animation/SkeletalMeshActor.h"
 #include "ControlRig.h"
-#include "ControlRigSequencerEditorLibrary.h"
 #include "Sequencer/MovieSceneControlRigParameterTrack.h"
 #include "SequencerTools.h"
 #include "Modules/ModuleManager.h"
@@ -130,6 +130,39 @@ ULevelSequence* USequencerAbstractionBPLibrary::LoadLevelSequenceAsset(const FSt
 ULevelSequence* USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence()
 {
     return ULevelSequenceEditorBlueprintLibrary::GetCurrentLevelSequence();
+}
+
+FControlRigSequencerBindingProxy USequencerAbstractionBPLibrary::GetRigBindingProxyBasedOnClassFromOpenSequence(TSubclassOf<UControlRig> InClass)
+{
+#if !WITH_EDITOR
+    return FControlRigSequencerBindingProxy();
+#else
+    UClass* TargetClass = InClass.Get();
+    if (!TargetClass)
+    {
+        return FControlRigSequencerBindingProxy();
+    }
+
+    ULevelSequence* Sequence = GetCurrentOpenedLevelSequence();
+    if (!Sequence)
+    {
+        return FControlRigSequencerBindingProxy();
+    }
+
+    const TArray<FControlRigSequencerBindingProxy> ControlRigs =
+        UControlRigSequencerEditorLibrary::GetControlRigs(Sequence);
+
+    for (const FControlRigSequencerBindingProxy& ControlRigBinding : ControlRigs)
+    {
+        UControlRig* ControlRig = ControlRigBinding.ControlRig;
+        if (ControlRig && ControlRig->GetClass() == TargetClass)
+        {
+            return ControlRigBinding;
+        }
+    }
+
+    return FControlRigSequencerBindingProxy();
+#endif
 }
 
 bool USequencerAbstractionBPLibrary::OpenLevelSequenceInSequencer(ULevelSequence* Sequence)
@@ -1373,6 +1406,28 @@ bool USequencerAbstractionBPLibrary::AddRigToBinding(
 
     Result.bSuccess = true;
     return true;
+}
+
+TArray<UMovieSceneScriptingChannel*> USequencerAbstractionBPLibrary::GetAllChannelsFromRigBindingSequenceTrack(UMovieSceneTrack* Track)
+{
+    TArray<UMovieSceneScriptingChannel*> AllChannels;
+    if (!Track)
+    {
+        return AllChannels;
+    }
+
+    const TArray<UMovieSceneSection*>& Sections = Track->GetAllSections();
+    for (UMovieSceneSection* Section : Sections)
+    {
+        if (!Section)
+        {
+            continue;
+        }
+
+        AllChannels.Append(UMovieSceneSectionExtensions::GetAllChannels(Section));
+    }
+
+    return AllChannels;
 }
 
 bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(

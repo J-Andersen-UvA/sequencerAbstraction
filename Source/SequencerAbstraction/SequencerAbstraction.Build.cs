@@ -14,6 +14,8 @@ public class SequencerAbstraction : ModuleRules
             "CoreUObject",
             "Engine",
             "MediaAssets",
+            "ControlRig",
+            "ControlRigEditor",
         });
 
         if (Target.bBuildEditor)
@@ -37,8 +39,6 @@ public class SequencerAbstraction : ModuleRules
                 "SequencerScriptingEditor",
 
                 "RigVM",
-                "ControlRig",
-                "ControlRigEditor",
 
                 "LevelEditor",
                 "Slate",
