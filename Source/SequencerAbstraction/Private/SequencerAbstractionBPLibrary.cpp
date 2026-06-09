@@ -165,6 +165,52 @@ FControlRigSequencerBindingProxy USequencerAbstractionBPLibrary::GetRigBindingPr
 #endif
 }
 
+bool USequencerAbstractionBPLibrary::GetCurrentFloatValueFromRigBindingProxy(
+    FControlRigSequencerBindingProxy RigBinding,
+    FName ControlName,
+    float& OutValue,
+    FString& ErrorMessage)
+{
+    OutValue = 0.0f;
+
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only.");
+    return false;
+#else
+    ErrorMessage.Empty();
+
+    ULevelSequence* Sequence = GetCurrentOpenedLevelSequence();
+    if (!Sequence)
+    {
+        ErrorMessage = TEXT("No Level Sequence is currently opened.");
+        return false;
+    }
+
+    UControlRig* ControlRig = RigBinding.ControlRig;
+    if (!ControlRig)
+    {
+        ErrorMessage = TEXT("Rig binding has no Control Rig.");
+        return false;
+    }
+
+    if (ControlName.IsNone())
+    {
+        ErrorMessage = TEXT("ControlName is None.");
+        return false;
+    }
+
+    const FFrameTime CurrentTime = ULevelSequenceEditorBlueprintLibrary::GetCurrentTime();
+    OutValue = UControlRigSequencerEditorLibrary::GetLocalControlRigFloat(
+        Sequence,
+        ControlRig,
+        ControlName,
+        CurrentTime.FrameNumber,
+        EMovieSceneTimeUnit::DisplayRate);
+
+    return true;
+#endif
+}
+
 bool USequencerAbstractionBPLibrary::OpenLevelSequenceInSequencer(ULevelSequence* Sequence)
 {
     if (!Sequence)

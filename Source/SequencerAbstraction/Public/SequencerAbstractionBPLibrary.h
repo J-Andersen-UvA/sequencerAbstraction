@@ -47,6 +47,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
     static FControlRigSequencerBindingProxy GetRigBindingProxyBasedOnClassFromOpenSequence(TSubclassOf<UControlRig> InClass);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
+    static bool GetCurrentFloatValueFromRigBindingProxy(
+        FControlRigSequencerBindingProxy RigBinding,
+        FName ControlName,
+        float& OutValue,
+        FString& ErrorMessage);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static TArray<FSequenceTrackInfo> GetAllTracksInCurrentSequence();
 
