@@ -5,6 +5,7 @@
 #include "SequencerTypes.generated.h"
 
 class UMovieSceneSection;
+class UMovieSceneSkeletalAnimationSection;
 class UAnimSequenceBase;
 
 USTRUCT(BlueprintType)
@@ -73,4 +74,79 @@ struct FSequenceOpenResult
 
     UPROPERTY(BlueprintReadOnly) bool bSuccess = false;
     UPROPERTY(BlueprintReadOnly) FString Error;
+};
+
+USTRUCT(BlueprintType)
+struct FActiveSkeletalAnimationInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    TObjectPtr<UAnimSequenceBase> Animation = nullptr;
+
+    UPROPERTY(BlueprintReadOnly)
+    TObjectPtr<UMovieSceneSkeletalAnimationSection> Section = nullptr;
+
+    UPROPERTY(BlueprintReadOnly)
+    FGuid BindingGuid;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString BindingName;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 SequencerDisplayFrame = 0;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 SequencerTickFrame = 0;
+
+    UPROPERTY(BlueprintReadOnly)
+    float AnimationTimeSeconds = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 RowIndex = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FSourceAnimationBoneFrameData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    FName BoneName = NAME_None;
+
+    UPROPERTY(BlueprintReadOnly)
+    FTransform LocalTransform = FTransform::Identity;
+};
+
+USTRUCT(BlueprintType)
+struct FSourceAnimationCurveFrameData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    FName CurveName = NAME_None;
+
+    UPROPERTY(BlueprintReadOnly)
+    float Value = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FSourceAnimationFrameData
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    TObjectPtr<UAnimSequenceBase> Animation = nullptr;
+
+    UPROPERTY(BlueprintReadOnly)
+    float AnimationTimeSeconds = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 AnimationFrame = 0;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FSourceAnimationBoneFrameData> Bones;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FSourceAnimationCurveFrameData> Curves;
 };

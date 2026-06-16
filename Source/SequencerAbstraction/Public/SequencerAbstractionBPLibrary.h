@@ -60,6 +60,22 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static TArray<UAnimSequence*> GetAllAnimSequencesInCurrentSequence();
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Animation")
+    static TArray<FActiveSkeletalAnimationInfo> GetActiveSkeletalAnimationsAtCurrentTime(FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Animation")
+    static bool SampleSourceAnimationFromActiveInfo(
+        const FActiveSkeletalAnimationInfo& ActiveAnimation,
+        FSourceAnimationFrameData& OutFrameData,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Animation")
+    static bool SampleSourceAnimationAtTime(
+        UAnimSequenceBase* Animation,
+        float AnimationTimeSeconds,
+        FSourceAnimationFrameData& OutFrameData,
+        FString& ErrorMessage);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static bool OpenLevelSequenceInSequencer(ULevelSequence* Sequence);
 
@@ -85,6 +101,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static int32 GetCurrentFrame(FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer", meta = (DisplayName = "sequencerTimeChanged"))
+    static bool sequencerTimeChanged();
 
     UFUNCTION(BlueprintCallable, Category="SequencerAbstraction|Sequencer")
     static bool FocusLevelSequenceEditor(ULevelSequence* Sequence);

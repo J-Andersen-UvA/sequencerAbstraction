@@ -16,6 +16,8 @@
 #include "Logging/LogMacros.h"
 
 #include "MovieScene.h"
+#include "MovieSceneSequencePlayer.h"
+#include "MovieSceneTimeUnit.h"
 #include "MovieSceneTrack.h"
 #include "MovieSceneSection.h"
 #include "Tracks/MovieSceneSkeletalAnimationTrack.h"
@@ -41,6 +43,8 @@
 #include "Exporters/AnimSeqExportOption.h"
 #include "Animation/AnimationSettings.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimCurveTypes.h"
 #include "Factories/AnimSequenceFactory.h"
 
 #include "Animation/SkeletalMeshActor.h"
@@ -60,6 +64,13 @@ static FString MakeMasterTrackKey(UMovieSceneTrack* Track, int32 Index)
 static FString MakeBindingTrackKey(const FGuid& Guid, UMovieSceneTrack* Track, int32 Index)
 {
     return FString::Printf(TEXT("BIND::%s::%s::%d"), *Guid.ToString(), *Track->GetClass()->GetName(), Index);
+}
+
+namespace
+{
+    TWeakObjectPtr<ULevelSequence> LastSequencerTimeSequence;
+    FFrameTime LastSequencerTime;
+    bool bHasLastSequencerTime = false;
 }
 
 ULevelSequence* USequencerAbstractionBPLibrary::CreateLevelSequenceAsset(
@@ -394,6 +405,192 @@ TArray<UAnimSequence*> USequencerAbstractionBPLibrary::GetAllAnimSequencesInCurr
     }
 
     return Out;
+}
+
+static FString GetBindingDisplayNameFromGuid(const UMovieScene* MovieScene, const FGuid& BindingGuid)
+{
+    if (!MovieScene || !BindingGuid.IsValid())
+    {
+        return FString();
+    }
+
+    UMovieScene* MovieSceneMutable = const_cast<UMovieScene*>(MovieScene);
+    if (FMovieSceneSpawnable* Spawnable = MovieSceneMutable->FindSpawnable(BindingGuid))
+    {
+        return Spawnable->GetName();
+    }
+
+    if (FMovieScenePossessable* Possessable = MovieSceneMutable->FindPossessable(BindingGuid))
+    {
+        return Possessable->GetName();
+    }
+
+    return BindingGuid.ToString();
+}
+
+TArray<FActiveSkeletalAnimationInfo> USequencerAbstractionBPLibrary::GetActiveSkeletalAnimationsAtCurrentTime(FString& ErrorMessage)
+{
+    TArray<FActiveSkeletalAnimationInfo> Out;
+
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only.");
+    return Out;
+#else
+    ErrorMessage.Empty();
+
+    ULevelSequence* Sequence = GetCurrentOpenedLevelSequence();
+    if (!Sequence)
+    {
+        ErrorMessage = TEXT("No Level Sequence is currently opened.");
+        return Out;
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        ErrorMessage = TEXT("Sequence has no MovieScene.");
+        return Out;
+    }
+
+    const FMovieSceneSequencePlaybackParams CurrentDisplayPosition =
+        ULevelSequenceEditorBlueprintLibrary::GetGlobalPosition(EMovieSceneTimeUnit::DisplayRate);
+    const FMovieSceneSequencePlaybackParams CurrentTickPosition =
+        ULevelSequenceEditorBlueprintLibrary::GetGlobalPosition(EMovieSceneTimeUnit::TickResolution);
+
+    const FFrameTime CurrentDisplayTime = CurrentDisplayPosition.Frame;
+    const FFrameTime CurrentTickTime = CurrentTickPosition.Frame;
+    const FFrameNumber CurrentTickFrame = CurrentTickTime.FrameNumber;
+    const FFrameRate TickResolution = MovieScene->GetTickResolution();
+
+    const UMovieScene* ConstMovieScene = MovieScene;
+    for (const FMovieSceneBinding& Binding : ConstMovieScene->GetBindings())
+    {
+        const FGuid BindingGuid = Binding.GetObjectGuid();
+        const FString BindingName = GetBindingDisplayNameFromGuid(MovieScene, BindingGuid);
+
+        for (UMovieSceneTrack* Track : Binding.GetTracks())
+        {
+            UMovieSceneSkeletalAnimationTrack* AnimTrack = Cast<UMovieSceneSkeletalAnimationTrack>(Track);
+            if (!AnimTrack)
+            {
+                continue;
+            }
+
+            for (UMovieSceneSection* Section : AnimTrack->GetAllSections())
+            {
+                UMovieSceneSkeletalAnimationSection* AnimSection = Cast<UMovieSceneSkeletalAnimationSection>(Section);
+                if (!AnimSection || !AnimSection->IsActive())
+                {
+                    continue;
+                }
+
+                const TRange<FFrameNumber> SectionRange = AnimSection->GetRange();
+                if (!SectionRange.Contains(CurrentTickFrame))
+                {
+                    continue;
+                }
+
+                UAnimSequenceBase* Animation = AnimSection->GetAnimation();
+                if (!Animation)
+                {
+                    continue;
+                }
+
+                FActiveSkeletalAnimationInfo Info;
+                Info.Animation = Animation;
+                Info.Section = AnimSection;
+                Info.BindingGuid = BindingGuid;
+                Info.BindingName = BindingName;
+                Info.SequencerDisplayFrame = CurrentDisplayTime.FrameNumber.Value;
+                Info.SequencerTickFrame = CurrentTickFrame.Value;
+                Info.AnimationTimeSeconds = static_cast<float>(AnimSection->MapTimeToAnimation(CurrentTickTime, TickResolution));
+                Info.RowIndex = AnimSection->GetRowIndex();
+                Out.Add(Info);
+            }
+        }
+    }
+
+    return Out;
+#endif
+}
+
+bool USequencerAbstractionBPLibrary::SampleSourceAnimationFromActiveInfo(
+    const FActiveSkeletalAnimationInfo& ActiveAnimation,
+    FSourceAnimationFrameData& OutFrameData,
+    FString& ErrorMessage)
+{
+    return SampleSourceAnimationAtTime(
+        ActiveAnimation.Animation.Get(),
+        ActiveAnimation.AnimationTimeSeconds,
+        OutFrameData,
+        ErrorMessage);
+}
+
+bool USequencerAbstractionBPLibrary::SampleSourceAnimationAtTime(
+    UAnimSequenceBase* Animation,
+    float AnimationTimeSeconds,
+    FSourceAnimationFrameData& OutFrameData,
+    FString& ErrorMessage)
+{
+    OutFrameData = {};
+
+    if (!Animation)
+    {
+        ErrorMessage = TEXT("Animation is null.");
+        return false;
+    }
+
+    const IAnimationDataModel* DataModel = Animation->GetDataModel();
+    if (!DataModel)
+    {
+        ErrorMessage = TEXT("Animation has no source data model.");
+        return false;
+    }
+
+    const double PlayLength = DataModel->GetPlayLength();
+    const double SampleTime = FMath::Clamp(
+        static_cast<double>(AnimationTimeSeconds),
+        0.0,
+        FMath::Max(0.0, PlayLength));
+
+    const FFrameRate SourceFrameRate = DataModel->GetFrameRate();
+    const FFrameTime SourceFrameTime = SourceFrameRate.AsFrameTime(SampleTime);
+
+    EAnimInterpolationType Interpolation = EAnimInterpolationType::Linear;
+    if (const UAnimSequence* AnimSequence = Cast<UAnimSequence>(Animation))
+    {
+        Interpolation = AnimSequence->Interpolation;
+    }
+
+    OutFrameData.Animation = Animation;
+    OutFrameData.AnimationTimeSeconds = static_cast<float>(SampleTime);
+    OutFrameData.AnimationFrame = SourceFrameTime.GetFrame().Value;
+
+    TArray<FName> BoneTrackNames;
+    DataModel->GetBoneTrackNames(BoneTrackNames);
+    OutFrameData.Bones.Reserve(BoneTrackNames.Num());
+
+    for (const FName& BoneName : BoneTrackNames)
+    {
+        FSourceAnimationBoneFrameData BoneData;
+        BoneData.BoneName = BoneName;
+        BoneData.LocalTransform = DataModel->EvaluateBoneTrackTransform(BoneName, SourceFrameTime, Interpolation);
+        OutFrameData.Bones.Add(BoneData);
+    }
+
+    const TArray<FFloatCurve>& FloatCurves = DataModel->GetFloatCurves();
+    OutFrameData.Curves.Reserve(FloatCurves.Num());
+
+    for (const FFloatCurve& FloatCurve : FloatCurves)
+    {
+        FSourceAnimationCurveFrameData CurveData;
+        CurveData.CurveName = FloatCurve.GetName();
+        CurveData.Value = FloatCurve.Evaluate(static_cast<float>(SampleTime));
+        OutFrameData.Curves.Add(CurveData);
+    }
+
+    ErrorMessage.Empty();
+    return true;
 }
 
 TArray<FSequenceBindingInfo> USequencerAbstractionBPLibrary::GetBindingsInSequence(ULevelSequence* Sequence)
@@ -2118,6 +2315,39 @@ int32 USequencerAbstractionBPLibrary::GetCurrentFrame(FString& ErrorMessage)
 
     return FrameTime.FrameNumber.Value;
 
+#endif
+}
+
+bool USequencerAbstractionBPLibrary::sequencerTimeChanged()
+{
+#if !WITH_EDITOR
+    return false;
+#else
+    ULevelSequence* Sequence = USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence();
+    if (!Sequence)
+    {
+        LastSequencerTimeSequence = nullptr;
+        LastSequencerTime = FFrameTime();
+        bHasLastSequencerTime = false;
+        return false;
+    }
+
+    const FFrameTime CurrentTime = ULevelSequenceEditorBlueprintLibrary::GetCurrentTime();
+    const bool bSequenceChanged = LastSequencerTimeSequence.Get() != Sequence;
+    const bool bTimeChanged =
+        !bHasLastSequencerTime ||
+        LastSequencerTime.FrameNumber != CurrentTime.FrameNumber ||
+        !FMath::IsNearlyEqual(LastSequencerTime.GetSubFrame(), CurrentTime.GetSubFrame());
+
+    if (bSequenceChanged || bTimeChanged)
+    {
+        LastSequencerTimeSequence = Sequence;
+        LastSequencerTime = CurrentTime;
+        bHasLastSequencerTime = true;
+        return true;
+    }
+
+    return false;
 #endif
 }
 
