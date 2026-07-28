@@ -14,6 +14,24 @@ class UControlRig;
 class UMovieSceneScriptingChannel;
 class AActor;
 
+USTRUCT(BlueprintType)
+struct SEQUENCERABSTRACTION_API FSequencerTimeChangeState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "SequencerAbstraction|Sequencer")
+    TObjectPtr<ULevelSequence> LastSequence = nullptr;
+
+    UPROPERTY(BlueprintReadOnly, Category = "SequencerAbstraction|Sequencer")
+    int32 LastFrameNumber = 0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "SequencerAbstraction|Sequencer")
+    float LastSubFrame = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "SequencerAbstraction|Sequencer")
+    bool bHasLastSequencerTime = false;
+};
+
 UCLASS()
 class SEQUENCERABSTRACTION_API USequencerAbstractionBPLibrary : public UBlueprintFunctionLibrary
 {
@@ -104,6 +122,9 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer", meta = (DisplayName = "sequencerTimeChanged"))
     static bool sequencerTimeChanged();
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer", meta = (DisplayName = "sequencerTimeChanged (State)"))
+    static bool sequencerTimeChangedForState(UPARAM(ref) FSequencerTimeChangeState& State);
 
     UFUNCTION(BlueprintCallable, Category="SequencerAbstraction|Sequencer")
     static bool FocusLevelSequenceEditor(ULevelSequence* Sequence);

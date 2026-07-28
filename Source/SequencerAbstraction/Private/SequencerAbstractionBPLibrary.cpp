@@ -71,6 +71,21 @@ namespace
     TWeakObjectPtr<ULevelSequence> LastSequencerTimeSequence;
     FFrameTime LastSequencerTime;
     bool bHasLastSequencerTime = false;
+
+    static bool isSequencerTimeDifferent(
+        ULevelSequence* LastSequence,
+        const bool bHasLastTime,
+        const int32 LastFrameNumber,
+        const float LastSubFrame,
+        ULevelSequence* CurrentSequence,
+        const FFrameTime& CurrentTime)
+    {
+        return
+            LastSequence != CurrentSequence ||
+            !bHasLastTime ||
+            LastFrameNumber != CurrentTime.FrameNumber.Value ||
+            !FMath::IsNearlyEqual(LastSubFrame, CurrentTime.GetSubFrame());
+    }
 }
 
 ULevelSequence* USequencerAbstractionBPLibrary::CreateLevelSequenceAsset(
@@ -2323,6 +2338,11 @@ bool USequencerAbstractionBPLibrary::sequencerTimeChanged()
 #if !WITH_EDITOR
     return false;
 #else
+    // This function uses one shared cache for the whole Blueprint library.
+    // With multiple independent callers, the first caller after a Sequencer time
+    // change updates the cache and returns true; later callers see the new cached
+    // time and return false. Use sequencerTimeChangedForState when each process,
+    // widget, or timer needs to detect the same time change independently.
     ULevelSequence* Sequence = USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence();
     if (!Sequence)
     {
@@ -2333,17 +2353,52 @@ bool USequencerAbstractionBPLibrary::sequencerTimeChanged()
     }
 
     const FFrameTime CurrentTime = ULevelSequenceEditorBlueprintLibrary::GetCurrentTime();
-    const bool bSequenceChanged = LastSequencerTimeSequence.Get() != Sequence;
-    const bool bTimeChanged =
-        !bHasLastSequencerTime ||
-        LastSequencerTime.FrameNumber != CurrentTime.FrameNumber ||
-        !FMath::IsNearlyEqual(LastSequencerTime.GetSubFrame(), CurrentTime.GetSubFrame());
-
-    if (bSequenceChanged || bTimeChanged)
+    if (isSequencerTimeDifferent(
+        LastSequencerTimeSequence.Get(),
+        bHasLastSequencerTime,
+        LastSequencerTime.FrameNumber.Value,
+        LastSequencerTime.GetSubFrame(),
+        Sequence,
+        CurrentTime))
     {
         LastSequencerTimeSequence = Sequence;
         LastSequencerTime = CurrentTime;
         bHasLastSequencerTime = true;
+        return true;
+    }
+
+    return false;
+#endif
+}
+
+bool USequencerAbstractionBPLibrary::sequencerTimeChangedForState(FSequencerTimeChangeState& State)
+{
+#if !WITH_EDITOR
+    return false;
+#else
+    ULevelSequence* Sequence = USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence();
+    if (!Sequence)
+    {
+        State.LastSequence = nullptr;
+        State.LastFrameNumber = 0;
+        State.LastSubFrame = 0.0f;
+        State.bHasLastSequencerTime = false;
+        return false;
+    }
+
+    const FFrameTime CurrentTime = ULevelSequenceEditorBlueprintLibrary::GetCurrentTime();
+    if (isSequencerTimeDifferent(
+        State.LastSequence.Get(),
+        State.bHasLastSequencerTime,
+        State.LastFrameNumber,
+        State.LastSubFrame,
+        Sequence,
+        CurrentTime))
+    {
+        State.LastSequence = Sequence;
+        State.LastFrameNumber = CurrentTime.FrameNumber.Value;
+        State.LastSubFrame = CurrentTime.GetSubFrame();
+        State.bHasLastSequencerTime = true;
         return true;
     }
 
