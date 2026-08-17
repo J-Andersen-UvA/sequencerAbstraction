@@ -2463,3 +2463,53 @@ bool USequencerAbstractionBPLibrary::FocusLevelViewport()
     return FSlateApplication::Get().SetKeyboardFocus(viewportWidget, EFocusCause::SetDirectly);
 #endif
 }
+
+UMovieSceneSkeletalAnimationSection* UAnimationSplitLibrary::SplitAnimationSection(
+    UMovieSceneSection* Section,
+    int32 SplitFrame,
+    FFrameRate FrameRate,
+    bool bDeleteKeys)
+{
+    if (!Section)
+    {
+        return nullptr;
+    }
+
+    UMovieScene* MovieScene = Section->GetTypedOuter<UMovieScene>();
+
+    if (!MovieScene)
+    {
+        return nullptr;
+    }
+
+    FFrameRate TickResolution = MovieScene->GetTickResolution();
+
+    // Convert display frame (e.g., Frame 100 @ 30fps) to internal TickResolution (24000fps)
+    FFrameTime TickTime = FFrameRate::TransformTime(
+        FFrameTime(FFrameNumber(SplitFrame)),
+        FrameRate,          // Source Display Rate (e.g., 30 fps)
+        TickResolution      // Target Tick Resolution (e.g., 24000 fps)
+    );
+
+    FQualifiedFrameTime SplitTime(TickTime, TickResolution);
+
+    UMovieSceneSkeletalAnimationSection* NewSection = Cast<UMovieSceneSkeletalAnimationSection>(Section->SplitSection(SplitTime, bDeleteKeys));
+    if (NewSection)
+    {
+        // 1. Mark for Editor Undo/Redo tracking
+        Section->Modify();
+        NewSection->Modify();
+
+        if (UMovieSceneTrack* Track = Section->GetTypedOuter<UMovieSceneTrack>())
+        {
+            Track->Modify();
+        }
+
+        // 2. Force Sequencer UI to redraw the tracks visually
+        if (GIsEditor && !IsRunningCommandlet())
+        {
+            ULevelSequenceEditorBlueprintLibrary::RefreshCurrentLevelSequence();
+        }
+    }
+    return NewSection;
+}
