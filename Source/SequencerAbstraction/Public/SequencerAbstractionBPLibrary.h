@@ -40,10 +40,12 @@ class SEQUENCERABSTRACTION_API UAnimationSplitLibrary : public UBlueprintFunctio
 public:
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
-    static UMovieSceneSkeletalAnimationSection* SplitAnimationSection(
+    static void SplitAnimationSection(
         UMovieSceneSection* Section,
         int32 SplitFrame,
         FFrameRate FrameRate,
+        UMovieSceneSkeletalAnimationSection*& OutRightSection,
+        UMovieSceneSkeletalAnimationSection*& OutLeftSection,
         bool bDeleteKeys = false
     );
 };

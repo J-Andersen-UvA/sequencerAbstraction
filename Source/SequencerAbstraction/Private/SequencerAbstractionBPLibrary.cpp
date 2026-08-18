@@ -2464,22 +2464,26 @@ bool USequencerAbstractionBPLibrary::FocusLevelViewport()
 #endif
 }
 
-UMovieSceneSkeletalAnimationSection* UAnimationSplitLibrary::SplitAnimationSection(
+void UAnimationSplitLibrary::SplitAnimationSection(
     UMovieSceneSection* Section,
     int32 SplitFrame,
     FFrameRate FrameRate,
+    UMovieSceneSkeletalAnimationSection*& OutRightSection,
+    UMovieSceneSkeletalAnimationSection*& OutLeftSection,
     bool bDeleteKeys)
-{
+{   
+    OutLeftSection = nullptr;
+    OutRightSection = nullptr;
+
     if (!Section)
     {
-        return nullptr;
+        return;
     }
 
     UMovieScene* MovieScene = Section->GetTypedOuter<UMovieScene>();
-
     if (!MovieScene)
     {
-        return nullptr;
+        return;
     }
 
     FFrameRate TickResolution = MovieScene->GetTickResolution();
@@ -2493,23 +2497,30 @@ UMovieSceneSkeletalAnimationSection* UAnimationSplitLibrary::SplitAnimationSecti
 
     FQualifiedFrameTime SplitTime(TickTime, TickResolution);
 
-    UMovieSceneSkeletalAnimationSection* NewSection = Cast<UMovieSceneSkeletalAnimationSection>(Section->SplitSection(SplitTime, bDeleteKeys));
-    if (NewSection)
+    // SplitSection modifies 'Section' in-place (Left) and returns the new section (Right)
+    UMovieSceneSkeletalAnimationSection* RightSection = Cast<UMovieSceneSkeletalAnimationSection>(Section->SplitSection(SplitTime, bDeleteKeys));
+    UMovieSceneSkeletalAnimationSection* LeftSection = Cast<UMovieSceneSkeletalAnimationSection>(Section);
+
+    if (RightSection)
     {
-        // 1. Mark for Editor Undo/Redo tracking
-        Section->Modify();
-        NewSection->Modify();
+        if (LeftSection)
+        {
+            LeftSection->Modify();
+        }
+        RightSection->Modify();
 
         if (UMovieSceneTrack* Track = Section->GetTypedOuter<UMovieSceneTrack>())
         {
             Track->Modify();
         }
 
-        // 2. Force Sequencer UI to redraw the tracks visually
         if (GIsEditor && !IsRunningCommandlet())
         {
             ULevelSequenceEditorBlueprintLibrary::RefreshCurrentLevelSequence();
         }
     }
-    return NewSection;
+
+    OutLeftSection = LeftSection;
+    OutRightSection = RightSection;
+
 }
