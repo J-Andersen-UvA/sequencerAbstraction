@@ -15,6 +15,18 @@ class UMovieSceneScriptingChannel;
 class AActor;
 
 USTRUCT(BlueprintType)
+struct FSectionLabelEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceAbstraction|SecctionAbstraction")
+	TObjectPtr<UMovieSceneSection> Section = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceAbstraction|SectionAbstraction")
+	FString Label;
+};
+
+USTRUCT(BlueprintType)
 struct SEQUENCERABSTRACTION_API FSequencerTimeChangeState
 {
     GENERATED_BODY()
@@ -32,14 +44,29 @@ struct SEQUENCERABSTRACTION_API FSequencerTimeChangeState
     bool bHasLastSequencerTime = false;
 };
 
+
 UCLASS()
-class SEQUENCERABSTRACTION_API UAnimationSplitLibrary : public UBlueprintFunctionLibrary
+class SEQUENCERABSTRACTION_API USectionAbstraction : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
 
 public:
+    /* Pairs sections with corresponding labels into a list of structs */
+	UFUNCTION(BlueprintCallable, Category = "SequenceAbstraction|SectionAbstraction")
+	static FSectionLabelEntry CreateSectionLabelEntry(
+		UMovieSceneSection* Section,
+		const FString& Label
+	);
 
-    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    /* Sets the animation asset for a skeletal animation section */
+	UFUNCTION(BlueprintCallable, Category = "SequenceAbstraction|SectionAbstraction")
+	static void SetAnimationAsset(
+		UMovieSceneSkeletalAnimationSection* Section,
+		UAnimSequenceBase* Animation
+	);
+    
+    /* Splits an animation section at a specified frame */
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|SectionAbstraction")
     static void SplitAnimationSection(
         UMovieSceneSection* Section,
         int32 SplitFrame,
@@ -48,8 +75,20 @@ public:
         UMovieSceneSkeletalAnimationSection*& OutLeftSection,
         bool bDeleteKeys = false
     );
-};
 
+    /* Functions moved from SequencerAbstractionBPLibrary class */
+
+	static bool RemoveAnimationSection(
+		ULevelSequence* Sequence,
+		UMovieSceneSkeletalAnimationSection* Section,
+		FSequenceOpenResult& Result
+	);
+
+
+private:
+ 
+
+};
 
 UCLASS()
 class SEQUENCERABSTRACTION_API USequencerAbstractionBPLibrary : public UBlueprintFunctionLibrary
@@ -179,7 +218,7 @@ public:
     //UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Track")
     //static void SetTrackDisplayName(UMovieSceneSection* section, const FString& newName);
 
-    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sections")
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|SectionAbstraction")
     static bool RemoveAnimSection(
         ULevelSequence* Sequence,
         UMovieSceneSkeletalAnimationSection* Section,

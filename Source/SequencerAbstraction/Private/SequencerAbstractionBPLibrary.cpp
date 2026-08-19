@@ -2250,53 +2250,13 @@ bool USequencerAbstractionBPLibrary::BakeBindingToControlRig(
 //    track->SetDisplayName(FText::FromString(newName));
 //}
 
+// Function body moved to USectionAbstraction
 bool USequencerAbstractionBPLibrary::RemoveAnimSection(
     ULevelSequence* Sequence,
     UMovieSceneSkeletalAnimationSection* Section,
     FSequenceOpenResult& Result)
 {
-    Result = {};
-
-    if (!Sequence || !Section)
-    {
-        Result.Error = TEXT("Sequence or Section is null.");
-        return false;
-    }
-
-    UMovieScene* MovieScene = Sequence->GetMovieScene();
-    if (!MovieScene)
-    {
-        Result.Error = TEXT("Sequence has no MovieScene.");
-        return false;
-    }
-
-    UMovieSceneSkeletalAnimationTrack* Track =
-        Cast<UMovieSceneSkeletalAnimationTrack>(Section->GetTypedOuter<UMovieSceneTrack>());
-
-    if (!Track)
-    {
-        Result.Error = TEXT("Could not resolve owning track for section.");
-        return false;
-    }
-
-    MovieScene->Modify();
-    Track->Modify();
-    Section->Modify();
-
-    const int32 Before = Track->GetAllSections().Num();
-    Track->RemoveSection(*Section);
-    const int32 After = Track->GetAllSections().Num();
-    const bool bRemoved = After < Before;
-    if (!bRemoved)
-    {
-        Result.Error = TEXT("Track->RemoveSection failed (section not found).");
-        return false;
-    }
-
-    Track->MarkAsChanged();
-    Sequence->MarkPackageDirty();
-    Result.bSuccess = true;
-    return true;
+    return USectionAbstraction::RemoveAnimationSection(Sequence, Section, Result);
 }
 
 int32 USequencerAbstractionBPLibrary::RemoveAnimSectionsByAnimSequence(
@@ -2820,63 +2780,3 @@ bool USequencerAbstractionBPLibrary::FocusLevelViewport()
 #endif
 }
 
-void UAnimationSplitLibrary::SplitAnimationSection(
-    UMovieSceneSection* Section,
-    int32 SplitFrame,
-    FFrameRate FrameRate,
-    UMovieSceneSkeletalAnimationSection*& OutRightSection,
-    UMovieSceneSkeletalAnimationSection*& OutLeftSection,
-    bool bDeleteKeys)
-{   
-    OutLeftSection = nullptr;
-    OutRightSection = nullptr;
-
-    if (!Section)
-    {
-        return;
-    }
-
-    UMovieScene* MovieScene = Section->GetTypedOuter<UMovieScene>();
-    if (!MovieScene)
-    {
-        return;
-    }
-
-    FFrameRate TickResolution = MovieScene->GetTickResolution();
-
-    // Convert display frame (e.g., Frame 100 @ 30fps) to internal TickResolution (24000fps)
-    FFrameTime TickTime = FFrameRate::TransformTime(
-        FFrameTime(FFrameNumber(SplitFrame)),
-        FrameRate,          // Source Display Rate (e.g., 30 fps)
-        TickResolution      // Target Tick Resolution (e.g., 24000 fps)
-    );
-
-    FQualifiedFrameTime SplitTime(TickTime, TickResolution);
-
-    // SplitSection modifies 'Section' in-place (Left) and returns the new section (Right)
-    UMovieSceneSkeletalAnimationSection* RightSection = Cast<UMovieSceneSkeletalAnimationSection>(Section->SplitSection(SplitTime, bDeleteKeys));
-    UMovieSceneSkeletalAnimationSection* LeftSection = Cast<UMovieSceneSkeletalAnimationSection>(Section);
-
-    if (RightSection)
-    {
-        if (LeftSection)
-        {
-            LeftSection->Modify();
-        }
-        RightSection->Modify();
-
-        if (UMovieSceneTrack* Track = Section->GetTypedOuter<UMovieSceneTrack>())
-        {
-            Track->Modify();
-        }
-
-        if (GIsEditor && !IsRunningCommandlet())
-        {
-            ULevelSequenceEditorBlueprintLibrary::RefreshCurrentLevelSequence();
-        }
-    }
-
-    OutLeftSection = LeftSection;
-    OutRightSection = RightSection;
-
-}
