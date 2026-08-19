@@ -33,6 +33,25 @@ struct SEQUENCERABSTRACTION_API FSequencerTimeChangeState
 };
 
 UCLASS()
+class SEQUENCERABSTRACTION_API UAnimationSplitLibrary : public UBlueprintFunctionLibrary
+{
+    GENERATED_BODY()
+
+public:
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static void SplitAnimationSection(
+        UMovieSceneSection* Section,
+        int32 SplitFrame,
+        FFrameRate FrameRate,
+        UMovieSceneSkeletalAnimationSection*& OutRightSection,
+        UMovieSceneSkeletalAnimationSection*& OutLeftSection,
+        bool bDeleteKeys = false
+    );
+};
+
+
+UCLASS()
 class SEQUENCERABSTRACTION_API USequencerAbstractionBPLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()

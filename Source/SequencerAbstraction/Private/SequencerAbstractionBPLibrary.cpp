@@ -2819,3 +2819,64 @@ bool USequencerAbstractionBPLibrary::FocusLevelViewport()
     return FSlateApplication::Get().SetKeyboardFocus(viewportWidget, EFocusCause::SetDirectly);
 #endif
 }
+
+void UAnimationSplitLibrary::SplitAnimationSection(
+    UMovieSceneSection* Section,
+    int32 SplitFrame,
+    FFrameRate FrameRate,
+    UMovieSceneSkeletalAnimationSection*& OutRightSection,
+    UMovieSceneSkeletalAnimationSection*& OutLeftSection,
+    bool bDeleteKeys)
+{   
+    OutLeftSection = nullptr;
+    OutRightSection = nullptr;
+
+    if (!Section)
+    {
+        return;
+    }
+
+    UMovieScene* MovieScene = Section->GetTypedOuter<UMovieScene>();
+    if (!MovieScene)
+    {
+        return;
+    }
+
+    FFrameRate TickResolution = MovieScene->GetTickResolution();
+
+    // Convert display frame (e.g., Frame 100 @ 30fps) to internal TickResolution (24000fps)
+    FFrameTime TickTime = FFrameRate::TransformTime(
+        FFrameTime(FFrameNumber(SplitFrame)),
+        FrameRate,          // Source Display Rate (e.g., 30 fps)
+        TickResolution      // Target Tick Resolution (e.g., 24000 fps)
+    );
+
+    FQualifiedFrameTime SplitTime(TickTime, TickResolution);
+
+    // SplitSection modifies 'Section' in-place (Left) and returns the new section (Right)
+    UMovieSceneSkeletalAnimationSection* RightSection = Cast<UMovieSceneSkeletalAnimationSection>(Section->SplitSection(SplitTime, bDeleteKeys));
+    UMovieSceneSkeletalAnimationSection* LeftSection = Cast<UMovieSceneSkeletalAnimationSection>(Section);
+
+    if (RightSection)
+    {
+        if (LeftSection)
+        {
+            LeftSection->Modify();
+        }
+        RightSection->Modify();
+
+        if (UMovieSceneTrack* Track = Section->GetTypedOuter<UMovieSceneTrack>())
+        {
+            Track->Modify();
+        }
+
+        if (GIsEditor && !IsRunningCommandlet())
+        {
+            ULevelSequenceEditorBlueprintLibrary::RefreshCurrentLevelSequence();
+        }
+    }
+
+    OutLeftSection = LeftSection;
+    OutRightSection = RightSection;
+
+}
