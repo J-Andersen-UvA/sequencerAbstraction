@@ -10,6 +10,11 @@
 #include "ISequencer.h"
 #include "ILevelSequenceEditorToolkit.h"
 #include "LevelSequenceEditorBlueprintLibrary.h"
+#include "MVVM/SectionModelStorageExtension.h"
+#include "MVVM/Selection/Selection.h"
+#include "MVVM/ViewModels/ChannelModel.h"
+#include "MVVM/ViewModels/SectionModel.h"
+#include "MVVM/ViewModels/SequencerEditorViewModel.h"
 #include "LevelSequence.h"
 #include "UObject/Package.h"
 #include "Misc/PackageName.h"
@@ -30,6 +35,9 @@
 #include "Channels/MovieSceneBoolChannel.h"
 #include "LevelSequenceEditorSubsystem.h"
 #include "ExtensionLibraries/MovieSceneSectionExtensions.h"
+#include "MovieSceneScriptingChannel.h"
+#include "Channels/MovieSceneChannel.h"
+#include "Channels/MovieSceneChannelProxy.h"
 #include "MediaSource.h"
 #include "MovieSceneMediaSection.h"
 #include "MovieSceneMediaTrack.h"
@@ -49,12 +57,18 @@
 
 #include "Animation/SkeletalMeshActor.h"
 #include "ControlRig.h"
+#include "ControlRigObjectBinding.h"
+#include "Rigs/FKControlRig.h"
+#include "Rigs/RigHierarchy.h"
 #include "Sequencer/MovieSceneControlRigParameterTrack.h"
+#include "Sequencer/MovieSceneControlRigParameterSection.h"
 #include "SequencerTools.h"
+#include "Units/Execution/RigUnit_InverseExecution.h"
 #include "Modules/ModuleManager.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "UObject/UnrealType.h"
 
 static FString MakeMasterTrackKey(UMovieSceneTrack* Track, int32 Index)
 {
@@ -733,6 +747,40 @@ static USkeletalMeshComponent* ResolveSkelCompFromBinding(const TArray<UObject*>
             if (USkeletalMeshComponent* Comp = Actor->FindComponentByClass<USkeletalMeshComponent>())
             {
                 return Comp;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+static UWorld* ResolveWorldForEditorSequencerAction(UObject* WorldContextObject)
+{
+    if (WorldContextObject)
+    {
+        if (UWorld* World = WorldContextObject->GetWorld())
+        {
+            return World;
+        }
+    }
+
+    if (!GEditor)
+    {
+        return nullptr;
+    }
+
+    if (UWorld* EditorWorld = GEditor->GetEditorWorldContext().World())
+    {
+        return EditorWorld;
+    }
+
+    for (const FWorldContext& WorldContext : GEditor->GetWorldContexts())
+    {
+        if (WorldContext.WorldType == EWorldType::Editor || WorldContext.WorldType == EWorldType::PIE)
+        {
+            if (UWorld* World = WorldContext.World())
+            {
+                return World;
             }
         }
     }
@@ -1666,26 +1714,31 @@ bool USequencerAbstractionBPLibrary::AddRigToBinding(
     return true;
 }
 
-TArray<UMovieSceneScriptingChannel*> USequencerAbstractionBPLibrary::GetAllChannelsFromRigBindingSequenceTrack(UMovieSceneTrack* Track)
+
+static TSharedPtr<ISequencer> GetOpenSequencerForSequence(ULevelSequence* Sequence)
 {
-    TArray<UMovieSceneScriptingChannel*> AllChannels;
-    if (!Track)
+#if WITH_EDITOR
+    if (!Sequence || !GEditor)
     {
-        return AllChannels;
+        return nullptr;
     }
 
-    const TArray<UMovieSceneSection*>& Sections = Track->GetAllSections();
-    for (UMovieSceneSection* Section : Sections)
+    UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+    if (!EditorSubsystem)
     {
-        if (!Section)
+        return nullptr;
+    }
+
+    if (IAssetEditorInstance* Inst = EditorSubsystem->FindEditorForAsset(Sequence, false))
+    {
+        if (ILevelSequenceEditorToolkit* Toolkit = static_cast<ILevelSequenceEditorToolkit*>(Inst))
         {
-            continue;
+            return Toolkit->GetSequencer();
         }
-
-        AllChannels.Append(UMovieSceneSectionExtensions::GetAllChannels(Section));
     }
+#endif
 
-    return AllChannels;
+    return nullptr;
 }
 
 bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
@@ -1879,6 +1932,309 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
     }
 
     NewAnim->MarkPackageDirty();
+    Result.bSuccess = true;
+    return true;
+#endif // WITH_EDITOR
+}
+
+bool USequencerAbstractionBPLibrary::BakeBindingToControlRig(
+    ULevelSequence* Sequence,
+    UObject* WorldContextObject,
+    const FGuid& BindingGuid,
+    TSubclassOf<UControlRig> ControlRigClass,
+    bool bReduceKeys,
+    float Tolerance,
+    bool bResetControls,
+    FSequenceOpenResult& Result)
+{
+#if !WITH_EDITOR
+    Result = {};
+    Result.Error = TEXT("BakeBindingToControlRig is editor-only.");
+    return false;
+#else
+    Result = {};
+
+    if (!Sequence || !BindingGuid.IsValid() || !*ControlRigClass)
+    {
+        Result.Error = TEXT("Invalid inputs (Sequence / BindingGuid / ControlRigClass).");
+        return false;
+    }
+
+    if (!ControlRigClass->IsChildOf(UControlRig::StaticClass()))
+    {
+        Result.Error = TEXT("ControlRigClass is not a UControlRig class.");
+        return false;
+    }
+
+    UWorld* World = ResolveWorldForEditorSequencerAction(WorldContextObject);
+    if (!World)
+    {
+        Result.Error = TEXT("Could not resolve an editor world for baking.");
+        return false;
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        Result.Error = TEXT("Sequence has no MovieScene.");
+        return false;
+    }
+
+    if (!MovieScene->FindBinding(BindingGuid))
+    {
+        Result.Error = TEXT("BindingGuid not found in MovieScene.");
+        return false;
+    }
+
+    if (GetCurrentOpenedLevelSequence() != Sequence)
+    {
+        if (!ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence))
+        {
+            Result.Error = TEXT("Failed to open LevelSequence in Sequencer.");
+            return false;
+        }
+    }
+
+    const FMovieSceneObjectBindingID BindingID{
+        UE::MovieScene::FRelativeObjectBindingID(BindingGuid)
+    };
+    const TArray<UObject*> BoundObjects = ULevelSequenceEditorBlueprintLibrary::GetBoundObjects(BindingID);
+    USkeletalMeshComponent* SkelComp = ResolveSkelCompFromBinding(BoundObjects);
+    if (!SkelComp || !SkelComp->GetSkeletalMeshAsset() || !SkelComp->GetSkeletalMeshAsset()->GetSkeleton())
+    {
+        Result.Error = TEXT("Could not resolve a valid USkeletalMeshComponent/Skeleton from the binding.");
+        return false;
+    }
+
+    UAnimSeqExportOption* ExportOptions = NewObject<UAnimSeqExportOption>(GetTransientPackage(), NAME_None);
+    if (!ExportOptions)
+    {
+        Result.Error = TEXT("Failed to create UAnimSeqExportOption.");
+        return false;
+    }
+
+    ExportOptions->bTransactRecording = false;
+    ExportOptions->bExportTransforms = true;
+    ExportOptions->bExportMorphTargets = true;
+    ExportOptions->bExportAttributeCurves = true;
+    ExportOptions->bBakeTimecode = false;
+    ExportOptions->bUseCustomFrameRate = true;
+    ExportOptions->CustomFrameRate = MovieScene->GetDisplayRate();
+    ExportOptions->CustomDisplayRate = MovieScene->GetDisplayRate();
+
+    TSharedPtr<ISequencer> Sequencer = GetOpenSequencerForSequence(Sequence);
+    if (!Sequencer.IsValid())
+    {
+        Result.Error = TEXT("Could not resolve the open Sequencer for this LevelSequence.");
+        return false;
+    }
+
+    UObject* BoundObject = BoundObjects.Num() > 0 ? BoundObjects[0] : nullptr;
+    if (!BoundObject)
+    {
+        Result.Error = TEXT("Binding has no valid bound object.");
+        return false;
+    }
+
+    UAnimSequence* TempAnimSequence = NewObject<UAnimSequence>(GetTransientPackage(), NAME_None);
+    if (!TempAnimSequence)
+    {
+        Result.Error = TEXT("Failed to create temporary animation sequence.");
+        return false;
+    }
+
+    TempAnimSequence->SetSkeleton(SkelComp->GetSkeletalMeshAsset()->GetSkeleton());
+
+    UMovieSceneSequence* FocusedSequence = Sequencer->GetFocusedMovieSceneSequence();
+    UMovieSceneSequence* RootSequence = Sequencer->GetRootMovieSceneSequence();
+    UMovieScene* FocusedMovieScene = FocusedSequence ? FocusedSequence->GetMovieScene() : MovieScene;
+
+    FAnimExportSequenceParameters ExportParams;
+    ExportParams.Player = Sequencer.Get();
+    ExportParams.RootToLocalTransform = Sequencer->GetFocusedMovieSceneSequenceTransform();
+    ExportParams.MovieSceneSequence = FocusedSequence ? FocusedSequence : Sequence;
+    ExportParams.RootMovieSceneSequence = RootSequence ? RootSequence : Sequence;
+    ExportParams.bForceUseOfMovieScenePlaybackRange = Sequencer->GetSequencerSettings()->ShouldEvaluateSubSequencesInIsolation();
+
+    const bool bExported = MovieSceneToolHelpers::ExportToAnimSequence(
+        TempAnimSequence,
+        ExportOptions,
+        ExportParams,
+        SkelComp);
+    if (!bExported)
+    {
+        TempAnimSequence->MarkAsGarbage();
+        Result.Error = TEXT("MovieSceneToolHelpers::ExportToAnimSequence failed while baking to Control Rig.");
+        return false;
+    }
+
+    const FScopedTransaction Transaction(NSLOCTEXT("SequencerAbstraction", "BakeBindingToControlRig", "Bake Binding To Control Rig"));
+    MovieScene->Modify();
+
+    UMovieSceneControlRigParameterTrack* ControlRigTrack =
+        MovieScene->FindTrack<UMovieSceneControlRigParameterTrack>(BindingGuid);
+    if (ControlRigTrack)
+    {
+        ControlRigTrack->Modify();
+        for (UMovieSceneSection* Section : ControlRigTrack->GetAllSections())
+        {
+            if (Section)
+            {
+                Section->Modify();
+                Section->SetIsActive(false);
+            }
+        }
+    }
+    else
+    {
+        ControlRigTrack = Cast<UMovieSceneControlRigParameterTrack>(
+            MovieScene->AddTrack(UMovieSceneControlRigParameterTrack::StaticClass(), BindingGuid));
+        if (ControlRigTrack)
+        {
+            ControlRigTrack->Modify();
+        }
+    }
+
+    if (!ControlRigTrack)
+    {
+        TempAnimSequence->MarkAsGarbage();
+        Result.Error = TEXT("Failed to create or find Control Rig parameter track.");
+        return false;
+    }
+
+    FString ObjectName = ControlRigClass->GetName();
+    ObjectName.RemoveFromEnd(TEXT("_C"));
+    UControlRig* ControlRig = NewObject<UControlRig>(
+        ControlRigTrack,
+        ControlRigClass.Get(),
+        FName(*ObjectName),
+        RF_Transactional);
+    if (!ControlRig)
+    {
+        TempAnimSequence->MarkAsGarbage();
+        Result.Error = TEXT("Failed to create Control Rig instance.");
+        return false;
+    }
+
+    FName OldInverseEventName(TEXT("Inverse"));
+    if (ControlRigClass.Get() != UFKControlRig::StaticClass() &&
+        !(ControlRig->SupportsEvent(FRigUnit_InverseExecution::EventName) || ControlRig->SupportsEvent(OldInverseEventName)))
+    {
+        TempAnimSequence->MarkAsGarbage();
+        MovieScene->RemoveTrack(*ControlRigTrack);
+        Result.Error = TEXT("Control Rig class does not support inverse execution.");
+        return false;
+    }
+
+    ControlRig->Modify();
+    ControlRig->SetObjectBinding(MakeShared<FControlRigObjectBinding>());
+    ControlRig->GetObjectBinding()->BindToObject(BoundObject);
+    ControlRig->GetDataSourceRegistry()->RegisterDataSource(
+        UControlRig::OwnerComponent,
+        ControlRig->GetObjectBinding()->GetBoundObject());
+    ControlRig->Initialize();
+    ControlRig->RequestInit();
+    ControlRig->SetBoneInitialTransformsFromSkeletalMeshComponent(SkelComp, true);
+    ControlRig->Evaluate_AnyThread();
+
+    constexpr bool bSequencerOwnsControlRig = true;
+    UMovieSceneSection* NewSection = ControlRigTrack->CreateControlRigSection(
+        FFrameNumber(0),
+        ControlRig,
+        bSequencerOwnsControlRig);
+    UMovieSceneControlRigParameterSection* ParamSection = Cast<UMovieSceneControlRigParameterSection>(NewSection);
+    if (!ParamSection)
+    {
+        TempAnimSequence->MarkAsGarbage();
+        Result.Error = TEXT("Failed to create Control Rig parameter section.");
+        return false;
+    }
+
+    ControlRigTrack->SetTrackName(FName(*ObjectName));
+    ControlRigTrack->SetDisplayName(FText::FromString(ObjectName));
+
+    const TOptional<TRange<FFrameNumber>> SubSequenceRange = Sequencer->GetSubSequenceRange();
+    const FFrameNumber StartFrame = SubSequenceRange.IsSet()
+        ? SubSequenceRange.GetValue().GetLowerBoundValue()
+        : FocusedMovieScene->GetPlaybackRange().GetLowerBoundValue();
+
+    UMovieSceneControlRigParameterSection::FLoadAnimSequenceData LoadData;
+    LoadData.bKeyReduce = bReduceKeys;
+    LoadData.Tolerance = Tolerance;
+    LoadData.bResetControls = bResetControls;
+    LoadData.StartFrame = StartFrame;
+    LoadData.bOntoSelectedControls = false;
+
+    const EMovieSceneKeyInterpolation DefaultInterpolation = Sequencer->GetKeyInterpolation();
+    const bool bLoaded = ParamSection->LoadAnimSequenceIntoThisSection(
+        TempAnimSequence,
+        FFrameNumber(0),
+        FocusedMovieScene,
+        SkelComp,
+        LoadData,
+        DefaultInterpolation);
+    if (!bLoaded)
+    {
+        TempAnimSequence->MarkAsGarbage();
+        Result.Error = TEXT("LoadAnimSequenceIntoThisSection failed while baking to Control Rig.");
+        return false;
+    }
+
+    TArray<UMovieSceneSkeletalAnimationTrack*> SkelAnimationTracks;
+    if (const FMovieSceneBinding* Binding = MovieScene->FindBinding(BindingGuid))
+    {
+        for (UMovieSceneTrack* MovieSceneTrack : Binding->GetTracks())
+        {
+            if (UMovieSceneSkeletalAnimationTrack* SkelTrack = Cast<UMovieSceneSkeletalAnimationTrack>(MovieSceneTrack))
+            {
+                SkelAnimationTracks.AddUnique(SkelTrack);
+            }
+        }
+    }
+
+    const FGuid SkelMeshComponentGuid = Sequencer->FindObjectId(*SkelComp, Sequencer->GetFocusedTemplateID());
+    if (const FMovieSceneBinding* ComponentBinding = MovieScene->FindBinding(SkelMeshComponentGuid))
+    {
+        for (UMovieSceneTrack* MovieSceneTrack : ComponentBinding->GetTracks())
+        {
+            if (UMovieSceneSkeletalAnimationTrack* SkelTrack = Cast<UMovieSceneSkeletalAnimationTrack>(MovieSceneTrack))
+            {
+                SkelAnimationTracks.AddUnique(SkelTrack);
+            }
+        }
+    }
+
+    for (UMovieSceneSkeletalAnimationTrack* SkelTrack : SkelAnimationTracks)
+    {
+        if (!SkelTrack)
+        {
+            continue;
+        }
+
+        SkelTrack->Modify();
+        if (SkelTrack->GetMaxRowIndex() == 0)
+        {
+            SkelTrack->SetEvalDisabled(true);
+        }
+        else
+        {
+            for (int32 RowIndex = 0; RowIndex <= SkelTrack->GetMaxRowIndex(); ++RowIndex)
+            {
+                SkelTrack->SetRowEvalDisabled(true, RowIndex);
+            }
+        }
+    }
+
+    Sequencer->EmptySelection();
+    Sequencer->SelectSection(NewSection);
+    Sequencer->ThrobSectionSelection();
+    Sequencer->ObjectImplicitlyAdded(ControlRig);
+    Sequencer->NotifyMovieSceneDataChanged(EMovieSceneDataChangeType::MovieSceneStructureItemAdded);
+
+    TempAnimSequence->MarkAsGarbage();
+    Sequence->MarkPackageDirty();
+    NotifySequencerMovieSceneChanged(Sequence);
+
     Result.bSuccess = true;
     return true;
 #endif // WITH_EDITOR

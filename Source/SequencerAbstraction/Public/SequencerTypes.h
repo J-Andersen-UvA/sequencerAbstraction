@@ -6,6 +6,7 @@
 
 class UMovieSceneSection;
 class UMovieSceneSkeletalAnimationSection;
+class UMovieSceneScriptingKey;
 class UAnimSequenceBase;
 
 USTRUCT(BlueprintType)
@@ -74,6 +75,30 @@ struct FSequenceOpenResult
 
     UPROPERTY(BlueprintReadOnly) bool bSuccess = false;
     UPROPERTY(BlueprintReadOnly) FString Error;
+};
+
+USTRUCT(BlueprintType)
+struct FSequencerKeyInSelectionRangeInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    TObjectPtr<UMovieSceneScriptingKey> Key = nullptr;
+
+    UPROPERTY(BlueprintReadOnly)
+    FName RequestedName = NAME_None;
+
+    UPROPERTY(BlueprintReadOnly)
+    FName ChannelName = NAME_None;
+
+    UPROPERTY(BlueprintReadOnly)
+    int32 DisplayFrame = 0;
+
+    UPROPERTY(BlueprintReadOnly)
+    float SubFrame = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString ValueString;
 };
 
 USTRUCT(BlueprintType)

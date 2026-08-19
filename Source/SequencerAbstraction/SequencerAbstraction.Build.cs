@@ -1,4 +1,5 @@
-﻿using UnrealBuildTool;
+using UnrealBuildTool;
+using System.IO;
 
 public class SequencerAbstraction : ModuleRules
 {
@@ -20,6 +21,11 @@ public class SequencerAbstraction : ModuleRules
 
         if (Target.bBuildEditor)
         {
+            PrivateIncludePaths.AddRange(new[]
+            {
+                Path.Combine(EngineDirectory, "Plugins/MovieScene/SequencerScripting/Source/SequencerScripting/Private/KeysAndChannels"),
+            });
+
             PrivateDependencyModuleNames.AddRange(new[]
             {
                 "UnrealEd",
@@ -31,8 +37,10 @@ public class SequencerAbstraction : ModuleRules
                 "MovieScene",
                 "MovieSceneTracks",
                 "MovieSceneTools",
+                "AnimationCore",
                 "MediaCompositing",
                 "Sequencer",
+                "SequencerCore",
                 "EditorScriptingUtilities",
                 "LevelSequenceEditor",
                 "SequencerScripting",

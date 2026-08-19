@@ -268,6 +268,70 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
     static TArray<UMovieSceneScriptingChannel*> GetAllChannelsFromRigBindingSequenceTrack(UMovieSceneTrack* Track);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Get Keys In Selection Range For Names", CPP_Default_bMatchContains = "true"))
+    static TArray<FSequencerKeyInSelectionRangeInfo> GetKeysInSelectionRangeForNames(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Select Keys In Selection Range For Names", CPP_Default_bMatchContains = "true", CPP_Default_bClearExistingSelection = "true", CPP_Default_bThrobSelection = "true"))
+    static int32 SelectKeysInSelectionRangeForNames(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        bool bClearExistingSelection,
+        bool bThrobSelection,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Select Keys At Frame For Names", CPP_Default_bMatchContains = "true", CPP_Default_bClearExistingSelection = "true", CPP_Default_bThrobSelection = "true"))
+    static int32 SelectKeysAtFrameForNames(
+        UMovieSceneTrack* Track,
+        int32 DisplayFrame,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        bool bClearExistingSelection,
+        bool bThrobSelection,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Select Bone Keys In Selection Range", CPP_Default_bClearExistingSelection = "true", CPP_Default_bThrobSelection = "true"))
+    static int32 SelectBoneKeysInSelectionRange(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& BoneNames,
+        bool bClearExistingSelection,
+        bool bThrobSelection,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Select Bone Keys At Frame", CPP_Default_bClearExistingSelection = "true", CPP_Default_bThrobSelection = "true"))
+    static int32 SelectBoneKeysAtFrame(
+        UMovieSceneTrack* Track,
+        int32 DisplayFrame,
+        const TArray<FName>& BoneNames,
+        bool bClearExistingSelection,
+        bool bThrobSelection,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Remove Keys From Selection In Selection Range For Names", CPP_Default_bMatchContains = "true"))
+    static int32 RemoveKeysFromSelectionInSelectionRangeForNames(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Get Selected Names In Track", CPP_Default_bMatchContains = "true"))
+    static TArray<FName> GetSelectedNamesInTrack(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        FString& ErrorMessage);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Bake")
     static bool BakeBindingToAnimSequence(
         ULevelSequence* Sequence,
@@ -275,6 +339,18 @@ public:
         const FGuid& BindingGuid,
         const FString& TargetPackagePath,
         const FString& NewAssetName,
+        FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Bake",
+        meta = (DisplayName = "Bake Binding To Control Rig", WorldContext = "WorldContextObject", CPP_Default_bReduceKeys = "false", CPP_Default_Tolerance = "0.001", CPP_Default_bResetControls = "true"))
+    static bool BakeBindingToControlRig(
+        ULevelSequence* Sequence,
+        UObject* WorldContextObject,
+        const FGuid& BindingGuid,
+        TSubclassOf<UControlRig> ControlRigClass,
+        bool bReduceKeys,
+        float Tolerance,
+        bool bResetControls,
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
