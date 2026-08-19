@@ -7,6 +7,7 @@
 #include "MediaSource.h"
 #include "SequencerTypes.h"
 #include "ControlRigSequencerEditorLibrary.h"
+#include "SectionAbstraction.h"
 
 #include "SequencerAbstractionBPLibrary.generated.h"
 
@@ -30,24 +31,6 @@ struct SEQUENCERABSTRACTION_API FSequencerTimeChangeState
 
     UPROPERTY(BlueprintReadOnly, Category = "SequencerAbstraction|Sequencer")
     bool bHasLastSequencerTime = false;
-};
-
-UCLASS()
-class SEQUENCERABSTRACTION_API UAnimationSplitLibrary : public UBlueprintFunctionLibrary
-{
-    GENERATED_BODY()
-
-public:
-
-    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
-    static void SplitAnimationSection(
-        UMovieSceneSection* Section,
-        int32 SplitFrame,
-        FFrameRate FrameRate,
-        UMovieSceneSkeletalAnimationSection*& OutRightSection,
-        UMovieSceneSkeletalAnimationSection*& OutLeftSection,
-        bool bDeleteKeys = false
-    );
 };
 
 
@@ -179,7 +162,7 @@ public:
     //UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Track")
     //static void SetTrackDisplayName(UMovieSceneSection* section, const FString& newName);
 
-    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sections")
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|SectionAbstraction")
     static bool RemoveAnimSection(
         ULevelSequence* Sequence,
         UMovieSceneSkeletalAnimationSection* Section,
