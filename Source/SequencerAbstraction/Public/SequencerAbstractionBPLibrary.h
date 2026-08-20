@@ -46,6 +46,26 @@ struct SEQUENCERABSTRACTION_API FSequencerTimeChangeState
 
 
 UCLASS()
+class SEQUENCERABSTRACTION_API UBakeAbstraction : public UBlueprintFunctionLibrary
+{
+	GENERATED_BODY()
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
+    static bool BakeBindingToControlRig(
+        const FGuid& BindingGuid,
+        TSubclassOf<UControlRig> ControlRigClass,
+        bool bReduceKeys,
+        float Tolerance,
+        bool bResetControls
+    );
+
+private:
+
+};
+
+
+UCLASS()
 class SEQUENCERABSTRACTION_API USectionAbstraction : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
@@ -397,18 +417,6 @@ public:
         const FGuid& BindingGuid,
         const FString& TargetPackagePath,
         const FString& NewAssetName,
-        FSequenceOpenResult& Result);
-
-    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Bake",
-        meta = (DisplayName = "Bake Binding To Control Rig", WorldContext = "WorldContextObject", CPP_Default_bReduceKeys = "false", CPP_Default_Tolerance = "0.001", CPP_Default_bResetControls = "true"))
-    static bool BakeBindingToControlRig(
-        ULevelSequence* Sequence,
-        UObject* WorldContextObject,
-        const FGuid& BindingGuid,
-        TSubclassOf<UControlRig> ControlRigClass,
-        bool bReduceKeys,
-        float Tolerance,
-        bool bResetControls,
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
