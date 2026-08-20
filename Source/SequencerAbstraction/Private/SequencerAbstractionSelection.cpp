@@ -2,6 +2,7 @@
 
 #include "Editor.h"
 #include "ILevelSequenceEditorToolkit.h"
+#include "IKeyArea.h"
 #include "ISequencer.h"
 #include "LevelSequence.h"
 #include "LevelSequenceEditorBlueprintLibrary.h"
@@ -14,17 +15,19 @@
 #include "ControlRig.h"
 #include "ExtensionLibraries/MovieSceneSectionExtensions.h"
 #include "MovieSceneScriptingChannel.h"
-#include "MVVM/SectionModelStorageExtension.h"
+#include "MVVM/Extensions/ITrackAreaExtension.h"
 #include "MVVM/Selection/Selection.h"
 #include "MVVM/ViewModels/ChannelModel.h"
-#include "MVVM/ViewModels/SectionModel.h"
 #include "MVVM/ViewModels/SequencerEditorViewModel.h"
+#include "MVVM/ViewModels/ViewModel.h"
 #include "Rigs/FKControlRig.h"
 #include "Rigs/RigHierarchy.h"
 #include "Sequencer/MovieSceneControlRigParameterSection.h"
 #include "Sequencer/MovieSceneControlRigParameterTrack.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/UnrealType.h"
+
+static ULevelSequence* GetLevelSequenceFromTrack(UMovieSceneTrack* Track);
 
 TArray<UMovieSceneScriptingChannel*> USequencerAbstractionBPLibrary::GetAllChannelsFromRigBindingSequenceTrack(UMovieSceneTrack* Track)
 {
@@ -164,6 +167,230 @@ static TSharedPtr<ISequencer> GetOpenSequencerForSelection(ULevelSequence* Seque
     return nullptr;
 }
 
+static TSharedPtr<ISequencer> EnsureOpenSequencerForTrack(UMovieSceneTrack* Track, FString& ErrorMessage)
+{
+    ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track);
+    if (!Sequence)
+    {
+        ErrorMessage = TEXT("Could not resolve Level Sequence from track.");
+        return nullptr;
+    }
+
+    if (USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence() != Sequence)
+    {
+        ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence);
+    }
+
+    TSharedPtr<ISequencer> Sequencer = GetOpenSequencerForSelection(Sequence);
+    if (!Sequencer.IsValid())
+    {
+        ErrorMessage = TEXT("Could not resolve open Sequencer for this track.");
+    }
+
+    return Sequencer;
+}
+
+static void GatherSequencerChannels(
+    TSharedPtr<UE::Sequencer::FViewModel> DataModel,
+    TSet<TSharedPtr<UE::Sequencer::FChannelModel>>& Channels)
+{
+    using namespace UE::Sequencer;
+
+    if (!DataModel)
+    {
+        return;
+    }
+
+    constexpr bool bIncludeThis = true;
+    for (const FViewModelPtr& Child : DataModel->GetDescendants(bIncludeThis))
+    {
+        if (TSharedPtr<ITrackAreaExtension> TrackArea = Child.ImplicitCast())
+        {
+            for (const FViewModelPtr& TrackAreaModel : TrackArea->GetTrackAreaModelList())
+            {
+                if (TSharedPtr<FChannelModel> Channel = TrackAreaModel.ImplicitCast())
+                {
+                    Channels.Add(Channel);
+                }
+            }
+        }
+        else if (TSharedPtr<FChannelModel> Channel = Child.ImplicitCast())
+        {
+            Channels.Add(Channel);
+        }
+    }
+}
+
+static void GatherChannelsForTrack(
+    TSharedPtr<ISequencer> Sequencer,
+    UMovieSceneTrack* Track,
+    TArray<TSharedPtr<UE::Sequencer::FChannelModel>>& OutChannels)
+{
+    using namespace UE::Sequencer;
+
+    OutChannels.Reset();
+    if (!Sequencer.IsValid() || !Track || !Sequencer->GetViewModel().IsValid())
+    {
+        return;
+    }
+
+    TSet<TSharedPtr<FChannelModel>> UniqueChannels;
+    GatherSequencerChannels(Sequencer->GetViewModel()->GetRootModel(), UniqueChannels);
+
+    OutChannels.Reserve(UniqueChannels.Num());
+    for (TSharedPtr<FChannelModel> Channel : UniqueChannels)
+    {
+        if (!Channel)
+        {
+            continue;
+        }
+
+        UMovieSceneSection* Section = Channel->GetSection();
+        if (Section && Section->GetTypedOuter<UMovieSceneTrack>() == Track)
+        {
+            OutChannels.Add(Channel);
+        }
+    }
+}
+
+static TRange<FFrameNumber> MakeSingleDisplayFrameRange(UMovieScene* MovieScene, int32 DisplayFrame)
+{
+    if (!MovieScene)
+    {
+        return TRange<FFrameNumber>::Empty();
+    }
+
+    const FFrameTime TickTime = FFrameRate::TransformTime(
+        FFrameTime(DisplayFrame),
+        MovieScene->GetDisplayRate(),
+        MovieScene->GetTickResolution());
+
+    const FFrameNumber TickFrame = TickTime.FrameNumber;
+    return TRange<FFrameNumber>(TickFrame, TickFrame);
+}
+
+static int32 SelectKeyHandlesForChannels(
+    TSharedPtr<ISequencer> Sequencer,
+    UMovieSceneTrack* Track,
+    const TRange<FFrameNumber>& SelectionRange,
+    TFunctionRef<bool(const TSharedPtr<UE::Sequencer::FChannelModel>&)> ShouldUseChannel,
+    bool bClearExistingSelection,
+    bool bThrobSelection)
+{
+    using namespace UE::Sequencer;
+
+    if (!Sequencer.IsValid() || !Sequencer->GetViewModel().IsValid())
+    {
+        return 0;
+    }
+
+    TSharedPtr<FSequencerSelection> Selection = Sequencer->GetViewModel()->GetSelection();
+    if (!Selection)
+    {
+        return 0;
+    }
+
+    FSelectionEventSuppressor EventSuppressor = Selection->SuppressEvents();
+
+    if (bClearExistingSelection)
+    {
+        TUniqueFragmentSelectionSet<FKeyHandle, FChannelModel>& BaseKeySelection = Selection->KeySelection;
+        BaseKeySelection.Empty();
+        Selection->TrackArea.Empty();
+    }
+
+    TArray<TSharedPtr<FChannelModel>> Channels;
+    GatherChannelsForTrack(Sequencer, Track, Channels);
+
+    int32 NumSelected = 0;
+    TArray<FKeyHandle> HandlesScratch;
+    for (const TSharedPtr<FChannelModel>& Channel : Channels)
+    {
+        if (!Channel || !ShouldUseChannel(Channel))
+        {
+            continue;
+        }
+
+        TSharedPtr<IKeyArea> KeyArea = Channel->GetKeyArea();
+        if (!KeyArea)
+        {
+            continue;
+        }
+
+        HandlesScratch.Reset();
+        KeyArea->GetKeyHandles(HandlesScratch, SelectionRange);
+
+        for (const FKeyHandle KeyHandle : HandlesScratch)
+        {
+            Selection->KeySelection.Select(Channel, KeyHandle);
+            ++NumSelected;
+        }
+    }
+
+    if (NumSelected > 0 && bThrobSelection)
+    {
+        Sequencer->ThrobKeySelection();
+    }
+
+    return NumSelected;
+}
+
+static int32 DeselectKeyHandlesForChannels(
+    TSharedPtr<ISequencer> Sequencer,
+    UMovieSceneTrack* Track,
+    const TRange<FFrameNumber>& SelectionRange,
+    TFunctionRef<bool(const TSharedPtr<UE::Sequencer::FChannelModel>&)> ShouldUseChannel)
+{
+    using namespace UE::Sequencer;
+
+    if (!Sequencer.IsValid() || !Sequencer->GetViewModel().IsValid())
+    {
+        return 0;
+    }
+
+    TSharedPtr<FSequencerSelection> Selection = Sequencer->GetViewModel()->GetSelection();
+    if (!Selection)
+    {
+        return 0;
+    }
+
+    FSelectionEventSuppressor EventSuppressor = Selection->SuppressEvents();
+
+    TArray<TSharedPtr<FChannelModel>> Channels;
+    GatherChannelsForTrack(Sequencer, Track, Channels);
+
+    int32 NumDeselected = 0;
+    TArray<FKeyHandle> HandlesScratch;
+    for (const TSharedPtr<FChannelModel>& Channel : Channels)
+    {
+        if (!Channel || !ShouldUseChannel(Channel))
+        {
+            continue;
+        }
+
+        TSharedPtr<IKeyArea> KeyArea = Channel->GetKeyArea();
+        if (!KeyArea)
+        {
+            continue;
+        }
+
+        HandlesScratch.Reset();
+        KeyArea->GetKeyHandles(HandlesScratch, SelectionRange);
+
+        for (const FKeyHandle KeyHandle : HandlesScratch)
+        {
+            if (Selection->KeySelection.IsSelected(KeyHandle))
+            {
+                TUniqueFragmentSelectionSet<FKeyHandle, FChannelModel>& BaseKeySelection = Selection->KeySelection;
+                BaseKeySelection.Deselect(KeyHandle);
+                ++NumDeselected;
+            }
+        }
+    }
+
+    return NumDeselected;
+}
+
 static ULevelSequence* GetLevelSequenceFromTrack(UMovieSceneTrack* Track)
 {
     if (!Track)
@@ -177,126 +404,6 @@ static ULevelSequence* GetLevelSequenceFromTrack(UMovieSceneTrack* Track)
     }
 
     return nullptr;
-}
-
-static int32 DeselectKeysByChannelProxy(
-    const FSequencerChannelProxy& ChannelProxy,
-    const TArray<int32>& Indices,
-    TSharedPtr<ISequencer> Sequencer)
-{
-    using namespace UE::Sequencer;
-
-    if (!Sequencer.IsValid())
-    {
-        return 0;
-    }
-
-    UMovieSceneSection* Section = ChannelProxy.Section;
-    if (!Section)
-    {
-        return 0;
-    }
-
-    FSectionModelStorageExtension* SectionModelStorage =
-        Sequencer->GetViewModel()->GetRootModel()->CastDynamic<FSectionModelStorageExtension>();
-    if (!SectionModelStorage)
-    {
-        return 0;
-    }
-
-    TSharedPtr<FSectionModel> SectionHandle = SectionModelStorage->FindModelForSection(Section);
-    if (!SectionHandle)
-    {
-        return 0;
-    }
-
-    TParentFirstChildIterator<FChannelGroupModel> KeyAreaNodes =
-        SectionHandle->GetParentTrackModel().AsModel()->GetDescendantsOfType<FChannelGroupModel>();
-
-    for (const TViewModelPtr<FChannelGroupModel>& KeyAreaNode : KeyAreaNodes)
-    {
-        if (KeyAreaNode->GetChannelName() != ChannelProxy.ChannelName)
-        {
-            continue;
-        }
-
-        TSharedPtr<FChannelModel> ChannelModel = KeyAreaNode->GetChannel(Section);
-        if (!ChannelModel)
-        {
-            return 0;
-        }
-
-        FMovieSceneChannel* MovieSceneChannel = ChannelModel->GetChannel();
-        if (!MovieSceneChannel)
-        {
-            return 0;
-        }
-
-        FKeySelection& KeySelection = Sequencer->GetViewModel()->GetSelection()->KeySelection;
-        TUniqueFragmentSelectionSet<FKeyHandle, FChannelModel>& BaseKeySelection = KeySelection;
-        int32 NumDeselected = 0;
-        for (int32 Index : Indices)
-        {
-            if (Index >= 0 && Index < MovieSceneChannel->GetNumKeys())
-            {
-                const FKeyHandle KeyHandle = MovieSceneChannel->GetHandle(Index);
-                BaseKeySelection.Deselect(KeyHandle);
-                ++NumDeselected;
-            }
-        }
-        return NumDeselected;
-    }
-
-    return 0;
-}
-
-static bool IsBoneChannelNameDelimiter(TCHAR Character)
-{
-    return Character == TEXT('.') ||
-        Character == TEXT(':') ||
-        Character == TEXT('/') ||
-        Character == TEXT('\\') ||
-        Character == TEXT(' ') ||
-        Character == TEXT('(') ||
-        Character == TEXT(')') ||
-        Character == TEXT('[') ||
-        Character == TEXT(']') ||
-        Character == TEXT(',');
-}
-
-static bool TextContainsBoneToken(const FString& Text, const TSet<FString>& BoneNameSet)
-{
-    if (Text.IsEmpty() || BoneNameSet.Num() == 0)
-    {
-        return false;
-    }
-
-    const FString LowerText = Text.ToLower();
-    if (BoneNameSet.Contains(LowerText))
-    {
-        return true;
-    }
-
-    int32 TokenStart = 0;
-    for (int32 Index = 0; Index <= LowerText.Len(); ++Index)
-    {
-        const bool bEndOfText = Index == LowerText.Len();
-        if (bEndOfText || IsBoneChannelNameDelimiter(LowerText[Index]))
-        {
-            if (Index > TokenStart)
-            {
-                const FString Token = LowerText.Mid(TokenStart, Index - TokenStart);
-                if (BoneNameSet.Contains(Token))
-                {
-                    return true;
-                }
-            }
-
-            TokenStart = Index + 1;
-        }
-    }
-
-    return false;
 }
 
 static TSet<FName> BuildRequestedBoneNameSet(const TArray<FName>& BoneNames)
@@ -436,20 +543,6 @@ static TSet<FName> BuildFkBoneControlNameSet(
     return BoneControlNames;
 }
 
-static bool DisplayFrameMatchesSelectionRange(
-    int32 DisplayFrame,
-    int32 StartDisplayFrame,
-    int32 EndDisplayFrame,
-    TOptional<int32> ExactDisplayFrame)
-{
-    if (ExactDisplayFrame.IsSet())
-    {
-        return DisplayFrame == ExactDisplayFrame.GetValue();
-    }
-
-    return DisplayFrame >= StartDisplayFrame && DisplayFrame <= EndDisplayFrame;
-}
-
 static int32 SelectBoneKeysInternal(
     UMovieSceneTrack* Track,
     const TArray<FName>& BoneNames,
@@ -479,30 +572,15 @@ static int32 SelectBoneKeysInternal(
         return 0;
     }
 
-    if (ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track))
+    TSharedPtr<ISequencer> Sequencer = EnsureOpenSequencerForTrack(Track, ErrorMessage);
+    if (!Sequencer.IsValid())
     {
-        if (USequencerAbstractionBPLibrary::GetCurrentOpenedLevelSequence() != Sequence)
-        {
-            ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence);
-        }
+        return 0;
     }
 
-    if (bClearExistingSelection)
-    {
-        ULevelSequenceEditorBlueprintLibrary::EmptySelection();
-    }
-
-    const FFrameRate TickResolution = MovieScene->GetTickResolution();
-    const FFrameRate DisplayRate = MovieScene->GetDisplayRate();
-
-    int32 NumSelected = 0;
+    TMap<UMovieSceneControlRigParameterSection*, TSet<FName>> BoneControlNamesBySection;
     for (UMovieSceneSection* Section : Track->GetAllSections())
     {
-        if (!Section)
-        {
-            continue;
-        }
-
         UMovieSceneControlRigParameterSection* ControlRigSection = Cast<UMovieSceneControlRigParameterSection>(Section);
         if (!ControlRigSection)
         {
@@ -511,89 +589,52 @@ static int32 SelectBoneKeysInternal(
 
         UControlRig* ControlRig = ResolveControlRigFromSectionOrTrack(ControlRigSection, Track);
         const TSet<FName> BoneControlNames = BuildFkBoneControlNameSet(ControlRig, RequestedBoneNames);
-        if (BoneControlNames.Num() == 0)
+        if (BoneControlNames.Num() > 0)
         {
-            continue;
-        }
-
-        const FMovieSceneChannelProxy& ChannelProxy = Section->GetChannelProxy();
-        for (const FMovieSceneChannelEntry& Entry : ChannelProxy.GetAllEntries())
-        {
-            const TArrayView<FMovieSceneChannel* const> Channels = Entry.GetChannels();
-            const TArrayView<const FMovieSceneChannelMetaData> MetaData = Entry.GetMetaData();
-            const int32 NumChannels = FMath::Min(Channels.Num(), MetaData.Num());
-
-            for (int32 ChannelIndex = 0; ChannelIndex < NumChannels; ++ChannelIndex)
-            {
-                FMovieSceneChannel* Channel = Channels[ChannelIndex];
-                if (!Channel)
-                {
-                    continue;
-                }
-
-                const UE::MovieScene::FControlRigChannelMetaData ControlRigMetaData =
-                    ControlRigSection->GetChannelMetaData(Channel);
-                if (!ControlRigMetaData || !BoneControlNames.Contains(ControlRigMetaData.GetControlName()))
-                {
-                    continue;
-                }
-
-                TArray<FFrameNumber> KeyTimes;
-                TArray<FKeyHandle> KeyHandles;
-                Channel->GetKeys(TRange<FFrameNumber>::All(), &KeyTimes, &KeyHandles);
-
-                if (KeyTimes.Num() == 0 || KeyTimes.Num() != KeyHandles.Num())
-                {
-                    continue;
-                }
-
-                const FFrameNumber KeyOffset = MetaData[ChannelIndex].GetOffsetTime(Section);
-                TArray<int32> KeyIndicesToSelect;
-                KeyIndicesToSelect.Reserve(KeyTimes.Num());
-
-                for (int32 KeyIndex = 0; KeyIndex < KeyTimes.Num(); ++KeyIndex)
-                {
-                    const FFrameNumber OffsetKeyTime = KeyTimes[KeyIndex] + KeyOffset;
-                    const FFrameTime DisplayTime = FFrameRate::TransformTime(
-                        FFrameTime(OffsetKeyTime),
-                        TickResolution,
-                        DisplayRate);
-                    const int32 DisplayFrame = DisplayTime.FrameNumber.Value;
-
-                    if (!DisplayFrameMatchesSelectionRange(DisplayFrame, StartDisplayFrame, EndDisplayFrame, ExactDisplayFrame))
-                    {
-                        continue;
-                    }
-
-                    const int32 RawKeyIndex = Channel->GetIndex(KeyHandles[KeyIndex]);
-                    if (RawKeyIndex != INDEX_NONE)
-                    {
-                        KeyIndicesToSelect.Add(RawKeyIndex);
-                    }
-                }
-
-                if (KeyIndicesToSelect.Num() > 0)
-                {
-                    const FSequencerChannelProxy SequencerChannelProxy(MetaData[ChannelIndex].Name, Section);
-                    ULevelSequenceEditorBlueprintLibrary::SelectKeys(SequencerChannelProxy, KeyIndicesToSelect);
-                    NumSelected += KeyIndicesToSelect.Num();
-                }
-            }
+            BoneControlNamesBySection.Add(ControlRigSection, BoneControlNames);
         }
     }
 
-    if (NumSelected > 0 && bThrobSelection)
+    if (BoneControlNamesBySection.Num() == 0)
     {
-        if (ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track))
-        {
-            if (TSharedPtr<ISequencer> Sequencer = GetOpenSequencerForSelection(Sequence))
-            {
-                Sequencer->ThrobKeySelection();
-            }
-        }
+        return 0;
     }
 
-    return NumSelected;
+    const TRange<FFrameNumber> KeyRange = ExactDisplayFrame.IsSet()
+        ? MakeSingleDisplayFrameRange(MovieScene, ExactDisplayFrame.GetValue())
+        : MovieScene->GetSelectionRange();
+
+    return SelectKeyHandlesForChannels(
+        Sequencer,
+        Track,
+        KeyRange,
+        [&BoneControlNamesBySection](const TSharedPtr<UE::Sequencer::FChannelModel>& Channel)
+        {
+            UMovieSceneControlRigParameterSection* ControlRigSection =
+                Cast<UMovieSceneControlRigParameterSection>(Channel->GetSection());
+            if (!ControlRigSection)
+            {
+                return false;
+            }
+
+            FMovieSceneChannel* MovieSceneChannel = Channel->GetChannel();
+            if (!MovieSceneChannel)
+            {
+                return false;
+            }
+
+            const TSet<FName>* BoneControlNames = BoneControlNamesBySection.Find(ControlRigSection);
+            if (!BoneControlNames)
+            {
+                return false;
+            }
+
+            const UE::MovieScene::FControlRigChannelMetaData ControlRigMetaData =
+                ControlRigSection->GetChannelMetaData(MovieSceneChannel);
+            return ControlRigMetaData && BoneControlNames->Contains(ControlRigMetaData.GetControlName());
+        },
+        bClearExistingSelection,
+        bThrobSelection);
 #endif
 }
 
@@ -693,92 +734,48 @@ int32 USequencerAbstractionBPLibrary::SelectKeysInSelectionRangeForNames(
         return 0;
     }
 
-    if (ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track))
+    UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>();
+    if (!MovieScene)
     {
-        if (GetCurrentOpenedLevelSequence() != Sequence)
-        {
-            ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence);
-        }
+        ErrorMessage = TEXT("Could not resolve MovieScene from track.");
+        return 0;
     }
 
-    const int32 RawStartFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeStart();
-    const int32 RawEndFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeEnd();
-    const int32 StartFrame = FMath::Min(RawStartFrame, RawEndFrame);
-    const int32 EndFrame = FMath::Max(RawStartFrame, RawEndFrame);
-
-    if (bClearExistingSelection)
+    TSharedPtr<ISequencer> Sequencer = EnsureOpenSequencerForTrack(Track, ErrorMessage);
+    if (!Sequencer.IsValid())
     {
-        ULevelSequenceEditorBlueprintLibrary::EmptySelection();
+        return 0;
     }
 
-    int32 NumSelected = 0;
-    const TArray<UMovieSceneScriptingChannel*> Channels = GetAllChannelsFromRigBindingSequenceTrack(Track);
-    for (UMovieSceneScriptingChannel* Channel : Channels)
-    {
-        if (!Channel)
+    const TRange<FFrameNumber> SelectionRange = MovieScene->GetSelectionRange();
+    const int32 NumSelected = SelectKeyHandlesForChannels(
+        Sequencer,
+        Track,
+        SelectionRange,
+        [&Names, bMatchContains](const TSharedPtr<UE::Sequencer::FChannelModel>& Channel)
         {
-            continue;
-        }
-
-        FName RequestedName = NAME_None;
-        if (!DoesChannelMatchAnyRequestedName(Channel->ChannelName, Names, bMatchContains, RequestedName))
-        {
-            continue;
-        }
-
-        UMovieSceneSection* Section = nullptr;
-        TArray<int32> KeyIndicesToSelect;
-
-        const TArray<UMovieSceneScriptingKey*> Keys = Channel->GetKeys();
-        for (int32 KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex)
-        {
-            UMovieSceneScriptingKey* Key = Keys[KeyIndex];
-            if (!Key)
+            if (!Channel)
             {
-                continue;
+                return false;
             }
 
-            const FFrameTime KeyTime = Key->GetTime(EMovieSceneTimeUnit::DisplayRate);
-            const int32 DisplayFrame = KeyTime.FrameNumber.Value;
-            if (DisplayFrame < StartFrame || DisplayFrame > EndFrame)
-            {
-                continue;
-            }
-
-            if (!Section)
-            {
-                Section = Key->OwningSection.Get();
-            }
-
-            KeyIndicesToSelect.Add(KeyIndex);
-        }
-
-        if (Section && KeyIndicesToSelect.Num() > 0)
-        {
-            const FSequencerChannelProxy ChannelProxy(Channel->ChannelName, Section);
-            ULevelSequenceEditorBlueprintLibrary::SelectKeys(ChannelProxy, KeyIndicesToSelect);
-            NumSelected += KeyIndicesToSelect.Num();
-        }
-    }
+            FName RequestedName = NAME_None;
+            return DoesChannelMatchAnyRequestedName(Channel->GetChannelName(), Names, bMatchContains, RequestedName);
+        },
+        bClearExistingSelection,
+        bThrobSelection);
 
     if (NumSelected == 0)
     {
+        const int32 RawStartFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeStart();
+        const int32 RawEndFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeEnd();
+        const int32 StartFrame = FMath::Min(RawStartFrame, RawEndFrame);
+        const int32 EndFrame = FMath::Max(RawStartFrame, RawEndFrame);
         ErrorMessage = FString::Printf(
             TEXT("No keys selected between selection frames %d and %d for the requested names."),
             StartFrame,
             EndFrame);
         return 0;
-    }
-
-    if (bThrobSelection)
-    {
-        if (ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track))
-        {
-            if (TSharedPtr<ISequencer> Sequencer = GetOpenSequencerForSelection(Sequence))
-            {
-                Sequencer->ThrobKeySelection();
-            }
-        }
     }
 
     return NumSelected;
@@ -806,67 +803,36 @@ int32 USequencerAbstractionBPLibrary::SelectKeysAtFrameForNames(
         return 0;
     }
 
-    if (ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track))
+    UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>();
+    if (!MovieScene)
     {
-        if (GetCurrentOpenedLevelSequence() != Sequence)
-        {
-            ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence);
-        }
+        ErrorMessage = TEXT("Could not resolve MovieScene from track.");
+        return 0;
     }
 
-    if (bClearExistingSelection)
+    TSharedPtr<ISequencer> Sequencer = EnsureOpenSequencerForTrack(Track, ErrorMessage);
+    if (!Sequencer.IsValid())
     {
-        ULevelSequenceEditorBlueprintLibrary::EmptySelection();
+        return 0;
     }
 
-    int32 NumSelected = 0;
-    const TArray<UMovieSceneScriptingChannel*> Channels = GetAllChannelsFromRigBindingSequenceTrack(Track);
-    for (UMovieSceneScriptingChannel* Channel : Channels)
-    {
-        if (!Channel)
+    const TRange<FFrameNumber> KeyRange = MakeSingleDisplayFrameRange(MovieScene, DisplayFrame);
+    const int32 NumSelected = SelectKeyHandlesForChannels(
+        Sequencer,
+        Track,
+        KeyRange,
+        [&Names, bMatchContains](const TSharedPtr<UE::Sequencer::FChannelModel>& Channel)
         {
-            continue;
-        }
-
-        FName RequestedName = NAME_None;
-        if (!DoesChannelMatchAnyRequestedName(Channel->ChannelName, Names, bMatchContains, RequestedName))
-        {
-            continue;
-        }
-
-        UMovieSceneSection* Section = nullptr;
-        TArray<int32> KeyIndicesToSelect;
-
-        const TArray<UMovieSceneScriptingKey*> Keys = Channel->GetKeys();
-        for (int32 KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex)
-        {
-            UMovieSceneScriptingKey* Key = Keys[KeyIndex];
-            if (!Key)
+            if (!Channel)
             {
-                continue;
+                return false;
             }
 
-            const FFrameTime KeyTime = Key->GetTime(EMovieSceneTimeUnit::DisplayRate);
-            if (KeyTime.FrameNumber.Value != DisplayFrame)
-            {
-                continue;
-            }
-
-            if (!Section)
-            {
-                Section = Key->OwningSection.Get();
-            }
-
-            KeyIndicesToSelect.Add(KeyIndex);
-        }
-
-        if (Section && KeyIndicesToSelect.Num() > 0)
-        {
-            const FSequencerChannelProxy ChannelProxy(Channel->ChannelName, Section);
-            ULevelSequenceEditorBlueprintLibrary::SelectKeys(ChannelProxy, KeyIndicesToSelect);
-            NumSelected += KeyIndicesToSelect.Num();
-        }
-    }
+            FName RequestedName = NAME_None;
+            return DoesChannelMatchAnyRequestedName(Channel->GetChannelName(), Names, bMatchContains, RequestedName);
+        },
+        bClearExistingSelection,
+        bThrobSelection);
 
     if (NumSelected == 0)
     {
@@ -874,17 +840,6 @@ int32 USequencerAbstractionBPLibrary::SelectKeysAtFrameForNames(
             TEXT("No keys selected at display frame %d for the requested names."),
             DisplayFrame);
         return 0;
-    }
-
-    if (bThrobSelection)
-    {
-        if (ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track))
-        {
-            if (TSharedPtr<ISequencer> Sequencer = GetOpenSequencerForSelection(Sequence))
-            {
-                Sequencer->ThrobKeySelection();
-            }
-        }
     }
 
     return NumSelected;
@@ -984,75 +939,41 @@ int32 USequencerAbstractionBPLibrary::RemoveKeysFromSelectionInSelectionRangeFor
         return 0;
     }
 
-    ULevelSequence* Sequence = GetLevelSequenceFromTrack(Track);
-    if (Sequence && GetCurrentOpenedLevelSequence() != Sequence)
+    UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>();
+    if (!MovieScene)
     {
-        ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(Sequence);
-    }
-
-    TSharedPtr<ISequencer> Sequencer = GetOpenSequencerForSelection(Sequence);
-    if (!Sequencer.IsValid())
-    {
-        ErrorMessage = TEXT("Could not resolve open Sequencer for this track.");
+        ErrorMessage = TEXT("Could not resolve MovieScene from track.");
         return 0;
     }
 
-    const int32 RawStartFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeStart();
-    const int32 RawEndFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeEnd();
-    const int32 StartFrame = FMath::Min(RawStartFrame, RawEndFrame);
-    const int32 EndFrame = FMath::Max(RawStartFrame, RawEndFrame);
-
-    int32 NumRemoved = 0;
-    const TArray<UMovieSceneScriptingChannel*> Channels = GetAllChannelsFromRigBindingSequenceTrack(Track);
-    for (UMovieSceneScriptingChannel* Channel : Channels)
+    TSharedPtr<ISequencer> Sequencer = EnsureOpenSequencerForTrack(Track, ErrorMessage);
+    if (!Sequencer.IsValid())
     {
-        if (!Channel)
-        {
-            continue;
-        }
-
-        FName RequestedName = NAME_None;
-        if (!DoesChannelMatchAnyRequestedName(Channel->ChannelName, Names, bMatchContains, RequestedName))
-        {
-            continue;
-        }
-
-        UMovieSceneSection* Section = nullptr;
-        TArray<int32> KeyIndicesToDeselect;
-
-        const TArray<UMovieSceneScriptingKey*> Keys = Channel->GetKeys();
-        for (int32 KeyIndex = 0; KeyIndex < Keys.Num(); ++KeyIndex)
-        {
-            UMovieSceneScriptingKey* Key = Keys[KeyIndex];
-            if (!Key)
-            {
-                continue;
-            }
-
-            const FFrameTime KeyTime = Key->GetTime(EMovieSceneTimeUnit::DisplayRate);
-            const int32 DisplayFrame = KeyTime.FrameNumber.Value;
-            if (DisplayFrame < StartFrame || DisplayFrame > EndFrame)
-            {
-                continue;
-            }
-
-            if (!Section)
-            {
-                Section = Key->OwningSection.Get();
-            }
-
-            KeyIndicesToDeselect.Add(KeyIndex);
-        }
-
-        if (Section && KeyIndicesToDeselect.Num() > 0)
-        {
-            const FSequencerChannelProxy ChannelProxy(Channel->ChannelName, Section);
-            NumRemoved += DeselectKeysByChannelProxy(ChannelProxy, KeyIndicesToDeselect, Sequencer);
-        }
+        return 0;
     }
+
+    const TRange<FFrameNumber> SelectionRange = MovieScene->GetSelectionRange();
+    const int32 NumRemoved = DeselectKeyHandlesForChannels(
+        Sequencer,
+        Track,
+        SelectionRange,
+        [&Names, bMatchContains](const TSharedPtr<UE::Sequencer::FChannelModel>& Channel)
+        {
+            if (!Channel)
+            {
+                return false;
+            }
+
+            FName RequestedName = NAME_None;
+            return DoesChannelMatchAnyRequestedName(Channel->GetChannelName(), Names, bMatchContains, RequestedName);
+        });
 
     if (NumRemoved == 0)
     {
+        const int32 RawStartFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeStart();
+        const int32 RawEndFrame = ULevelSequenceEditorBlueprintLibrary::GetSelectionRangeEnd();
+        const int32 StartFrame = FMath::Min(RawStartFrame, RawEndFrame);
+        const int32 EndFrame = FMath::Max(RawStartFrame, RawEndFrame);
         ErrorMessage = FString::Printf(
             TEXT("No matching keys were removed from selection between selection frames %d and %d."),
             StartFrame,
