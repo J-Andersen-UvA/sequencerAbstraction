@@ -16,6 +16,7 @@
 #include "ExtensionLibraries/MovieSceneSectionExtensions.h"
 #include "MovieSceneScriptingChannel.h"
 #include "MVVM/Extensions/ITrackAreaExtension.h"
+#include "MVVM/Extensions/IOutlinerExtension.h"
 #include "MVVM/Selection/Selection.h"
 #include "MVVM/ViewModels/ChannelModel.h"
 #include "MVVM/ViewModels/SequencerEditorViewModel.h"
@@ -1061,6 +1062,7 @@ int32 USequencerAbstractionBPLibrary::FocusSequencerRowsForNames(
     FString& ErrorMessage)
 {
     ErrorMessage.Empty();
+    (void)bClearExistingRowSelection;
 
 #if !WITH_EDITOR
     ErrorMessage = TEXT("Editor only.");
@@ -1128,13 +1130,25 @@ int32 USequencerAbstractionBPLibrary::FocusSequencerRowsForNames(
         return 0;
     }
 
-    if (bClearExistingRowSelection && Sequencer->GetViewModel().IsValid())
+    TSharedPtr<UE::Sequencer::FSequencerSelection> Selection =
+        Sequencer->GetViewModel().IsValid() ? Sequencer->GetViewModel()->GetSelection() : nullptr;
+
+    TArray<TPair<FKeyHandle, UE::Sequencer::TViewModelPtr<UE::Sequencer::FChannelModel>>> PreviousKeySelection;
+    TSet<UE::Sequencer::TWeakViewModelPtr<UE::Sequencer::IOutlinerExtension>> PreviousOutlinerSelection;
+    if (Selection)
     {
-        if (TSharedPtr<UE::Sequencer::FSequencerSelection> Selection = Sequencer->GetViewModel()->GetSelection())
+        PreviousKeySelection.Reserve(Selection->KeySelection.Num());
+        for (const FKeyHandle KeyHandle : Selection->KeySelection.GetSelected())
         {
-            UE::Sequencer::FSelectionEventSuppressor EventSuppressor = Selection->SuppressEvents();
-            Selection->Outliner.Empty();
+            UE::Sequencer::TViewModelPtr<UE::Sequencer::FChannelModel> ChannelModel =
+                Selection->KeySelection.GetModelForKey(KeyHandle);
+            if (ChannelModel)
+            {
+                PreviousKeySelection.Emplace(KeyHandle, ChannelModel);
+            }
         }
+
+        PreviousOutlinerSelection = Selection->Outliner.GetSelected();
     }
 
     for (const TPair<UMovieSceneSection*, TArray<FName>>& SectionAndNames : ChannelNamesBySection)
@@ -1144,6 +1158,24 @@ int32 USequencerAbstractionBPLibrary::FocusSequencerRowsForNames(
             SectionAndNames.Value,
             bSelectParentInstead,
             true);
+    }
+
+    if (Selection)
+    {
+        UE::Sequencer::FSelectionEventSuppressor EventSuppressor = Selection->SuppressEvents();
+
+        Selection->Outliner.Empty();
+        Selection->Outliner.SelectRange(PreviousOutlinerSelection);
+
+        UE::Sequencer::TUniqueFragmentSelectionSet<FKeyHandle, UE::Sequencer::FChannelModel>& BaseKeySelection = Selection->KeySelection;
+        BaseKeySelection.Empty();
+        for (const TPair<FKeyHandle, UE::Sequencer::TViewModelPtr<UE::Sequencer::FChannelModel>>& KeyAndChannel : PreviousKeySelection)
+        {
+            if (KeyAndChannel.Value)
+            {
+                BaseKeySelection.Select(KeyAndChannel.Value, KeyAndChannel.Key);
+            }
+        }
     }
 
     return UniqueMatchedChannelNames.Num();
