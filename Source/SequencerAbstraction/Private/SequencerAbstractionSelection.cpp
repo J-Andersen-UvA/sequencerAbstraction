@@ -1052,3 +1052,100 @@ TArray<FName> USequencerAbstractionBPLibrary::GetSelectedNamesInTrack(
 #endif
 }
 
+int32 USequencerAbstractionBPLibrary::FocusSequencerRowsForNames(
+    UMovieSceneTrack* Track,
+    const TArray<FName>& Names,
+    bool bMatchContains,
+    bool bSelectParentInstead,
+    bool bClearExistingRowSelection,
+    FString& ErrorMessage)
+{
+    ErrorMessage.Empty();
+
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only.");
+    return 0;
+#else
+    if (!Track)
+    {
+        ErrorMessage = TEXT("Track is null.");
+        return 0;
+    }
+
+    TSharedPtr<ISequencer> Sequencer = EnsureOpenSequencerForTrack(Track, ErrorMessage);
+    if (!Sequencer.IsValid())
+    {
+        return 0;
+    }
+
+    TArray<TSharedPtr<UE::Sequencer::FChannelModel>> Channels;
+    GatherChannelsForTrack(Sequencer, Track, Channels);
+
+    TMap<UMovieSceneSection*, TArray<FName>> ChannelNamesBySection;
+    TSet<FName> UniqueMatchedChannelNames;
+    for (const TSharedPtr<UE::Sequencer::FChannelModel>& Channel : Channels)
+    {
+        if (!Channel)
+        {
+            continue;
+        }
+
+        UMovieSceneSection* Section = Channel->GetSection();
+        if (!Section)
+        {
+            continue;
+        }
+
+        FName RequestedName = NAME_None;
+        bool bMatches = DoesChannelMatchAnyRequestedName(Channel->GetChannelName(), Names, bMatchContains, RequestedName);
+
+        if (!bMatches)
+        {
+            if (UMovieSceneControlRigParameterSection* ControlRigSection = Cast<UMovieSceneControlRigParameterSection>(Section))
+            {
+                if (FMovieSceneChannel* MovieSceneChannel = Channel->GetChannel())
+                {
+                    const UE::MovieScene::FControlRigChannelMetaData ControlRigMetaData =
+                        ControlRigSection->GetChannelMetaData(MovieSceneChannel);
+                    bMatches = ControlRigMetaData &&
+                        DoesChannelMatchAnyRequestedName(ControlRigMetaData.GetControlName(), Names, bMatchContains, RequestedName);
+                }
+            }
+        }
+
+        if (!bMatches)
+        {
+            continue;
+        }
+
+        ChannelNamesBySection.FindOrAdd(Section).AddUnique(Channel->GetChannelName());
+        UniqueMatchedChannelNames.Add(Channel->GetChannelName());
+    }
+
+    if (ChannelNamesBySection.Num() == 0)
+    {
+        ErrorMessage = TEXT("No Sequencer rows matched the requested names.");
+        return 0;
+    }
+
+    if (bClearExistingRowSelection && Sequencer->GetViewModel().IsValid())
+    {
+        if (TSharedPtr<UE::Sequencer::FSequencerSelection> Selection = Sequencer->GetViewModel()->GetSelection())
+        {
+            UE::Sequencer::FSelectionEventSuppressor EventSuppressor = Selection->SuppressEvents();
+            Selection->Outliner.Empty();
+        }
+    }
+
+    for (const TPair<UMovieSceneSection*, TArray<FName>>& SectionAndNames : ChannelNamesBySection)
+    {
+        Sequencer->SelectByChannels(
+            SectionAndNames.Key,
+            SectionAndNames.Value,
+            bSelectParentInstead,
+            true);
+    }
+
+    return UniqueMatchedChannelNames.Num();
+#endif
+}

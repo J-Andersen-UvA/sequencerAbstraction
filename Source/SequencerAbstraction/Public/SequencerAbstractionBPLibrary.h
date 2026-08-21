@@ -410,6 +410,16 @@ public:
         bool bMatchContains,
         FString& ErrorMessage);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Focus Sequencer Rows For Names", CPP_Default_bMatchContains = "true", CPP_Default_bSelectParentInstead = "true", CPP_Default_bClearExistingRowSelection = "true"))
+    static int32 FocusSequencerRowsForNames(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        bool bSelectParentInstead,
+        bool bClearExistingRowSelection,
+        FString& ErrorMessage);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Bake")
     static bool BakeBindingToAnimSequence(
         ULevelSequence* Sequence,
