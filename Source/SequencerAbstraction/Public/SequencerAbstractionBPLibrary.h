@@ -71,6 +71,16 @@ class SEQUENCERABSTRACTION_API USectionAbstraction : public UBlueprintFunctionLi
     GENERATED_BODY()
 
 public:
+
+	UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|SectionAbstraction")
+    static void MatchSectionByBone(
+        UMovieSceneSkeletalAnimationSection* CurrentSection,
+        USkeletalMeshComponent* SkelMeshComp,
+        FFrameTime CurrentFrame,
+        FFrameRate FrameRate,
+        FName BoneName
+    );
+    
     /* Pairs sections with corresponding labels into a list of structs */
 	UFUNCTION(BlueprintCallable, Category = "SequenceAbstraction|SectionAbstraction")
 	static FSectionLabelEntry CreateSectionLabelEntry(
