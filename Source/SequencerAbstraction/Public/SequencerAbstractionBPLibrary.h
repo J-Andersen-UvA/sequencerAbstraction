@@ -72,6 +72,7 @@ class SEQUENCERABSTRACTION_API USectionAbstraction : public UBlueprintFunctionLi
 
 public:
 
+	/* Matches a skeletal animation section to a specific bone in a skeletal mesh component */
 	UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|SectionAbstraction")
     static void MatchSectionByBone(
         UMovieSceneSkeletalAnimationSection* CurrentSection,
