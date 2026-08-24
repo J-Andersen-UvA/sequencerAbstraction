@@ -11,6 +11,7 @@
 #include "SequencerAbstractionBPLibrary.generated.h"
 
 class UControlRig;
+class UMovieSceneControlRigParameterTrack;
 class UMovieSceneScriptingChannel;
 class AActor;
 
@@ -183,6 +184,12 @@ public:
         FSequenceOpenResult& Result);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
+    static FGuid FindPossessableBinding(
+        ULevelSequence* Sequence,
+        AActor* Actor,
+        FSequenceOpenResult& Result);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static FGuid FindOrCreatePossessableBinding(
         ULevelSequence* Sequence,
         AActor* Actor,
@@ -193,6 +200,13 @@ public:
         ULevelSequence* Sequence,
         FGuid BindingGuid,
         TSubclassOf<UMovieSceneTrack> TrackClass,
+        FString& ErrorMessage);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
+    static UMovieSceneControlRigParameterTrack* GetControlRigTrackFromGuid(
+        ULevelSequence* Sequence,
+        FGuid BindingGuid,
+        TSubclassOf<UControlRig> ControlRigClass,
         FString& ErrorMessage);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")

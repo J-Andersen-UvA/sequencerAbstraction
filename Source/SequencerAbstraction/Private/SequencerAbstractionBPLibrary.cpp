@@ -1380,6 +1380,52 @@ FGuid USequencerAbstractionBPLibrary::FindOrCreatePossessableBinding(
     return BindingGuid;
 }
 
+FGuid USequencerAbstractionBPLibrary::FindPossessableBinding(
+    ULevelSequence* Sequence,
+    AActor* Actor,
+    FSequenceOpenResult& Result)
+{
+    Result = {};
+
+    if (!Sequence || !Actor)
+    {
+        Result.Error = TEXT("Sequence or Actor is null.");
+        return FGuid();
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        Result.Error = TEXT("Sequence has no MovieScene.");
+        return FGuid();
+    }
+
+    const FString ActorLabel = Actor->GetActorLabel();
+    const UClass* ActorClass = Actor->GetClass();
+
+    for (const FMovieSceneBinding& Binding : static_cast<const UMovieScene*>(MovieScene)->GetBindings())
+    {
+        FMovieScenePossessable* Possessable = MovieScene->FindPossessable(Binding.GetObjectGuid());
+        if (Possessable &&
+            Possessable->GetName() == ActorLabel &&
+            Possessable->GetPossessedObjectClass() == ActorClass)
+        {
+            if (UWorld* World = Actor->GetWorld())
+            {
+                Sequence->BindPossessableObject(Binding.GetObjectGuid(), *Actor, World);
+            }
+
+            Result.bSuccess = true;
+            return Binding.GetObjectGuid();
+        }
+    }
+
+    Result.Error = FString::Printf(
+        TEXT("No possessable binding found for actor '%s'."),
+        *ActorLabel);
+    return FGuid();
+}
+
 bool USequencerAbstractionBPLibrary::SnapSectionToSourceTimecode(
     ULevelSequence* Sequence,
     UMovieSceneSection* Section,
@@ -2280,6 +2326,71 @@ UMovieSceneTrack* USequencerAbstractionBPLibrary::GetTrackFromGuid(
     }
 
     ErrorMessage = TEXT("No matching track found.");
+    return nullptr;
+
+#endif
+}
+
+UMovieSceneControlRigParameterTrack* USequencerAbstractionBPLibrary::GetControlRigTrackFromGuid(
+    ULevelSequence* Sequence,
+    FGuid BindingGuid,
+    TSubclassOf<UControlRig> ControlRigClass,
+    FString& ErrorMessage)
+{
+#if !WITH_EDITOR
+    ErrorMessage = TEXT("Editor only.");
+    return nullptr;
+#else
+
+    ErrorMessage.Empty();
+
+    if (!Sequence)
+    {
+        ErrorMessage = TEXT("Sequence is null.");
+        return nullptr;
+    }
+
+    UMovieScene* MovieScene = Sequence->GetMovieScene();
+    if (!MovieScene)
+    {
+        ErrorMessage = TEXT("MovieScene is null.");
+        return nullptr;
+    }
+
+    const FMovieSceneBinding* Binding = MovieScene->FindBinding(BindingGuid);
+    if (!Binding)
+    {
+        ErrorMessage = TEXT("Binding GUID not found.");
+        return nullptr;
+    }
+
+    UClass* TargetControlRigClass = ControlRigClass.Get();
+    for (UMovieSceneTrack* Track : Binding->GetTracks())
+    {
+        UMovieSceneControlRigParameterTrack* ControlRigTrack = Cast<UMovieSceneControlRigParameterTrack>(Track);
+        if (!ControlRigTrack)
+        {
+            continue;
+        }
+
+        UControlRig* ControlRig = ControlRigTrack->GetControlRig();
+        if (!TargetControlRigClass || (ControlRig && ControlRig->GetClass()->IsChildOf(TargetControlRigClass)))
+        {
+            return ControlRigTrack;
+        }
+    }
+
+    if (TargetControlRigClass)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("No Control Rig track found for class '%s'."),
+            *TargetControlRigClass->GetName());
+    }
+    else
+    {
+        ErrorMessage = TEXT("No Control Rig track found.");
+    }
+
     return nullptr;
 
 #endif
