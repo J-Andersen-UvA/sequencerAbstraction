@@ -6,6 +6,7 @@
 
 class ISequencer;
 class ULevelSequence;
+enum class EMovieSceneDataChangeType;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSequencerAbstractionSequenceEvent, ULevelSequence*, Sequence);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FSequencerAbstractionDataChangedEvent, ULevelSequence*, Sequence, const FString&, ChangeType, int32, ChangeTypeValue);
