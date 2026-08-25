@@ -239,15 +239,93 @@ bool USequencerAbstractionBPLibrary::GetCurrentFloatValueFromRigBindingProxy(
         return false;
     }
 
-    const FFrameTime CurrentTime = ULevelSequenceEditorBlueprintLibrary::GetCurrentTime();
-    OutValue = UControlRigSequencerEditorLibrary::GetLocalControlRigFloat(
-        Sequence,
-        ControlRig,
-        ControlName,
-        CurrentTime.FrameNumber,
-        EMovieSceneTimeUnit::DisplayRate);
+    if (!RigBinding.Proxy.BindingID.IsValid())
+    {
+        ErrorMessage = TEXT("Rig binding proxy has an invalid BindingID.");
+        return false;
+    }
 
-    return true;
+    if (RigBinding.Proxy.Sequence != Sequence)
+    {
+        ErrorMessage = TEXT("Rig binding proxy does not belong to the currently opened Level Sequence.");
+        return false;
+    }
+
+    UMovieSceneControlRigParameterTrack* Track = RigBinding.Track;
+    if (!Track)
+    {
+        ErrorMessage = TEXT("Rig binding proxy has no Control Rig parameter track.");
+        return false;
+    }
+
+    if (Track->GetControlRig() != ControlRig)
+    {
+        ErrorMessage = TEXT("Rig binding proxy track does not reference the same Control Rig instance.");
+        return false;
+    }
+
+    FRigControlElement* ControlElement = ControlRig->FindControl(ControlName);
+    if (!ControlElement)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("Control Rig does not contain control '%s'."),
+            *ControlName.ToString());
+        return false;
+    }
+
+    const ERigControlType ControlType = ControlElement->Settings.ControlType;
+    if (ControlType != ERigControlType::Float && ControlType != ERigControlType::ScaleFloat)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("Control '%s' is not a float control."),
+            *ControlName.ToString());
+        return false;
+    }
+
+    const FMovieSceneSequencePlaybackParams CurrentTickPosition =
+        ULevelSequenceEditorBlueprintLibrary::GetGlobalPosition(EMovieSceneTimeUnit::TickResolution);
+    const FFrameTime CurrentTickTime = CurrentTickPosition.Frame;
+
+    UMovieSceneControlRigParameterSection* FirstScalarSection = nullptr;
+    for (UMovieSceneSection* RawSection : Track->GetAllSections())
+    {
+        UMovieSceneControlRigParameterSection* Section = Cast<UMovieSceneControlRigParameterSection>(RawSection);
+        if (!Section || !Section->HasScalarParameter(ControlName))
+        {
+            continue;
+        }
+
+        if (!FirstScalarSection)
+        {
+            FirstScalarSection = Section;
+        }
+
+        if (Section->GetRange().Contains(CurrentTickTime.FrameNumber))
+        {
+            const TOptional<float> EvaluatedValue = Section->EvaluateScalarParameter(CurrentTickTime, ControlName);
+            if (EvaluatedValue.IsSet())
+            {
+                OutValue = EvaluatedValue.GetValue();
+                return true;
+            }
+        }
+    }
+
+    if (FirstScalarSection)
+    {
+        const TOptional<float> EvaluatedValue = FirstScalarSection->EvaluateScalarParameter(CurrentTickTime, ControlName);
+        if (EvaluatedValue.IsSet())
+        {
+            OutValue = EvaluatedValue.GetValue();
+            return true;
+        }
+    }
+
+    ErrorMessage = FString::Printf(
+        TEXT("No scalar channel found for control '%s' on the proxy's Control Rig track."),
+        *ControlName.ToString());
+    return false;
+
 #endif
 }
 
