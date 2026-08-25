@@ -2019,32 +2019,6 @@ static FFrameNumber DisplayFrameToTickFrame(const UMovieScene* MovieScene, int32
     return bRoundUp ? TickTime.CeilToFrame() : TickTime.FloorToFrame();
 }
 
-static TSharedPtr<ISequencer> GetOpenSequencerForSequence(ULevelSequence* Sequence)
-{
-#if WITH_EDITOR
-    if (!Sequence || !GEditor)
-    {
-        return nullptr;
-    }
-
-    UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-    if (!EditorSubsystem)
-    {
-        return nullptr;
-    }
-
-    if (IAssetEditorInstance* Inst = EditorSubsystem->FindEditorForAsset(Sequence, false))
-    {
-        if (ILevelSequenceEditorToolkit* Toolkit = static_cast<ILevelSequenceEditorToolkit*>(Inst))
-        {
-            return Toolkit->GetSequencer();
-        }
-    }
-#endif
-
-    return nullptr;
-}
-
 
 bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
     ULevelSequence* Sequence,
@@ -2086,34 +2060,20 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
     const FFrameNumber NewStartTick = DisplayFrameToTickFrame(MovieScene, NewStartFrame, /*bRoundUp*/ false);
     const FFrameNumber NewEndTickEx = NewStartTick + DurationTicks;
 
-    // Get parent track before modifying
-    UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
-
     MovieScene->Modify();
     Section->Modify();
+    
+    // Notify parent track to recalculate overlapping sections and easing
+    UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
 
     if (ParentTrack)
     {
         ParentTrack->Modify();
+		ParentTrack->MarkAsChanged();
+		ParentTrack->UpdateEasing();
     }
 
     Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
-
-    TSharedPtr<ISequencer> SequencerPtr = GetOpenSequencerForSequence(Sequence);
-    if (!SequencerPtr.IsValid()) return false;
-
-    // 2. Retrieve the active Sequencer instance
-    TSharedPtr<ISequencer> ActiveSequencer = SequencerPtr;
-
-    if (ActiveSequencer.IsValid())
-    {
-        // 3. Trigger the data change notification
-        // Options include: RefreshWholeSequencer, MovieSceneStructureChanged, TrackValueChanged
-        ActiveSequencer->NotifyMovieSceneDataChanged(EMovieSceneDataChangeType::TrackValueChanged);
-    } 
-    else {
-        Result.Error = TEXT("Failed to retrieve active Sequencer instance.");
-    }
 
     Sequence->MarkPackageDirty();
     Result.bSuccess = true;
@@ -2173,6 +2133,16 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
 
     MovieScene->Modify();
     Section->Modify();
+
+	// Notify parent track to recalculate overlapping sections and easing
+    UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
+
+    if (ParentTrack)
+    {
+        ParentTrack->Modify();
+        ParentTrack->MarkAsChanged();
+        ParentTrack->UpdateEasing();
+    }
 
     Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
 
