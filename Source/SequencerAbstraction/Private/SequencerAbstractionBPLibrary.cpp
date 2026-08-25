@@ -2065,6 +2065,7 @@ static FFrameNumber DisplayFrameToTickFrame(const UMovieScene* MovieScene, int32
     return bRoundUp ? TickTime.CeilToFrame() : TickTime.FloorToFrame();
 }
 
+
 bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
     ULevelSequence* Sequence,
     UMovieSceneSection* Section,
@@ -2107,6 +2108,16 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
 
     MovieScene->Modify();
     Section->Modify();
+    
+    // Notify parent track to recalculate overlapping sections and easing
+    UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
+
+    if (ParentTrack)
+    {
+        ParentTrack->Modify();
+		ParentTrack->MarkAsChanged();
+		ParentTrack->UpdateEasing();
+    }
 
     Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
 
@@ -2168,6 +2179,16 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
 
     MovieScene->Modify();
     Section->Modify();
+
+	// Notify parent track to recalculate overlapping sections and easing
+    UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
+
+    if (ParentTrack)
+    {
+        ParentTrack->Modify();
+        ParentTrack->MarkAsChanged();
+        ParentTrack->UpdateEasing();
+    }
 
     Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
 
