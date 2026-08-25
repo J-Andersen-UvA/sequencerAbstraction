@@ -100,6 +100,8 @@ void USectionAbstraction::SplitAnimationSection(
         if (UMovieSceneTrack* Track = Section->GetTypedOuter<UMovieSceneTrack>())
         {
             Track->Modify();
+			Track->MarkAsChanged();
+			Track->UpdateEasing();
         }
 
         if (GIsEditor && !IsRunningCommandlet())
