@@ -445,6 +445,18 @@ public:
         bool bClearExistingRowSelection,
         FString& ErrorMessage);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Focus Sequencer Sections For Names", CPP_Default_bMatchContains = "true", CPP_Default_bClearExistingSelection = "true", CPP_Default_bThrobSelection = "true", CPP_Default_bFrameMatchedSections = "true", CPP_Default_ViewPaddingSeconds = "0.25"))
+    static int32 FocusSequencerSectionsForNames(
+        UMovieSceneTrack* Track,
+        const TArray<FName>& Names,
+        bool bMatchContains,
+        bool bClearExistingSelection,
+        bool bThrobSelection,
+        bool bFrameMatchedSections,
+        double ViewPaddingSeconds,
+        FString& ErrorMessage);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Bake")
     static bool BakeBindingToAnimSequence(
         ULevelSequence* Sequence,
