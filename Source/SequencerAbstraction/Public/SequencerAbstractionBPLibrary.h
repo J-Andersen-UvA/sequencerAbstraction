@@ -13,6 +13,7 @@
 class UControlRig;
 class UMovieSceneControlRigParameterTrack;
 class UMovieSceneScriptingChannel;
+class UMovieSceneScriptingFloatChannel;
 class AActor;
 
 USTRUCT(BlueprintType)
@@ -370,6 +371,12 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig")
     static TArray<UMovieSceneScriptingChannel*> GetAllChannelsFromRigBindingSequenceTrack(UMovieSceneTrack* Track);
+
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Channels")
+    static bool EvaluateFloatChannelAtTime(
+        UMovieSceneScriptingFloatChannel* Channel,
+        FFrameTime Time,
+        float& OutValue);
 
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
         meta = (DisplayName = "Get Keys In Selection Range For Names", CPP_Default_bMatchContains = "true"))

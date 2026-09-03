@@ -10,8 +10,10 @@
 #include "MovieSceneSection.h"
 #include "MovieSceneTimeUnit.h"
 #include "MovieSceneTrack.h"
+#include "MovieSceneScriptingFloat.h"
 #include "Channels/MovieSceneChannel.h"
 #include "Channels/MovieSceneChannelProxy.h"
+#include "Channels/MovieSceneFloatChannel.h"
 #include "ControlRig.h"
 #include "ExtensionLibraries/MovieSceneSectionExtensions.h"
 #include "MovieSceneScriptingChannel.h"
@@ -50,6 +52,26 @@ TArray<UMovieSceneScriptingChannel*> USequencerAbstractionBPLibrary::GetAllChann
     }
 
     return AllChannels;
+}
+
+bool USequencerAbstractionBPLibrary::EvaluateFloatChannelAtTime(
+    UMovieSceneScriptingFloatChannel* Channel,
+    FFrameTime Time,
+    float& OutValue)
+{
+    OutValue = 0.0f;
+
+    if (!Channel || !Channel->OwningSection.IsValid())
+    {
+        return false;
+    }
+
+    FMovieSceneChannelProxy& ChannelProxy = Channel->OwningSection->GetChannelProxy();
+    TMovieSceneChannelHandle<FMovieSceneFloatChannel> FloatChannelHandle =
+        ChannelProxy.GetChannelByName<FMovieSceneFloatChannel>(Channel->ChannelName);
+
+    const FMovieSceneFloatChannel* FloatChannel = FloatChannelHandle.Get();
+    return FloatChannel && FloatChannel->Evaluate(Time, OutValue);
 }
 
 static FString GetScriptingKeyValueString(UMovieSceneScriptingKey* Key)
