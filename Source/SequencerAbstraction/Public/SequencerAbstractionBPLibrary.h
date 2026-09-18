@@ -17,7 +17,7 @@ class UMovieSceneScriptingFloatChannel;
 class AActor;
 
 USTRUCT(BlueprintType)
-struct FSectionLabelEntry
+struct SEQUENCERABSTRACTION_API FSectionLabelEntry
 {
 	GENERATED_BODY()
 
