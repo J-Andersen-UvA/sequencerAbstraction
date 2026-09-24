@@ -2036,6 +2036,7 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
 
     NewAnim->MarkPackageDirty();
     Result.bSuccess = true;
+    SaveAsset(NewAnim);
     return true;
 #endif // WITH_EDITOR
 }

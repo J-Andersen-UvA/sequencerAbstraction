@@ -110,7 +110,6 @@ public:
     );
 
     /* Functions moved from SequencerAbstractionBPLibrary class */
-
 	static bool RemoveAnimationSection(
 		ULevelSequence* Sequence,
 		UMovieSceneSkeletalAnimationSection* Section,
