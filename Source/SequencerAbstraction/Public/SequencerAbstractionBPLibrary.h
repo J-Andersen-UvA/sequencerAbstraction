@@ -17,7 +17,7 @@ class UMovieSceneScriptingFloatChannel;
 class AActor;
 
 USTRUCT(BlueprintType)
-struct FSectionLabelEntry
+struct SEQUENCERABSTRACTION_API FSectionLabelEntry
 {
 	GENERATED_BODY()
 
@@ -26,6 +26,9 @@ struct FSectionLabelEntry
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceAbstraction|SectionAbstraction")
 	FString Label;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SequenceAbstraction|SectionAbstraction")
+    int32 GlossIndex;
 };
 
 USTRUCT(BlueprintType)
@@ -88,7 +91,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SequenceAbstraction|SectionAbstraction")
 	static FSectionLabelEntry CreateSectionLabelEntry(
 		UMovieSceneSection* Section,
-		const FString& Label
+		const FString& Label,
+        int32 GlossIndex
 	);
 
     /* Sets the animation asset for a skeletal animation section */
@@ -110,7 +114,6 @@ public:
     );
 
     /* Functions moved from SequencerAbstractionBPLibrary class */
-
 	static bool RemoveAnimationSection(
 		ULevelSequence* Sequence,
 		UMovieSceneSkeletalAnimationSection* Section,

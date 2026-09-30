@@ -1970,16 +1970,38 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
     // Create via AssetTools + UAnimSequenceFactory (preferred in-editor path)
     UAnimSequence* NewAnim = nullptr;
     {
-        FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-        IAssetTools& AssetTools = AssetToolsModule.Get();
+        // 1. Check if the asset already exists at the target path
+        FString FullAssetPath = FString::Printf(TEXT("%s/%s.%s"), *CleanPath, *NewAssetName, *NewAssetName);
+        NewAnim = LoadObject<UAnimSequence>(nullptr, *FullAssetPath);
 
-        UAnimSequenceFactory* Factory = NewObject<UAnimSequenceFactory>();
-        Factory->TargetSkeleton = SkelComp->GetSkeletalMeshAsset()->GetSkeleton();
+        // 2. If it does not exist, create a new one
+        if (!NewAnim)
+        {
+            FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+            IAssetTools& AssetTools = AssetToolsModule.Get();
 
-        // Folder must be /Game/... style. Assume caller passes that.
-        NewAnim = Cast<UAnimSequence>(
-            AssetTools.CreateAsset(*NewAssetName, *CleanPath, UAnimSequence::StaticClass(), Factory)
-        );
+            UAnimSequenceFactory* Factory = NewObject<UAnimSequenceFactory>();
+            Factory->TargetSkeleton = SkelComp->GetSkeletalMeshAsset()->GetSkeleton();
+
+            NewAnim = Cast<UAnimSequence>(
+                AssetTools.CreateAsset(*NewAssetName, *CleanPath, UAnimSequence::StaticClass(), Factory)
+            );
+        }
+        else
+        {
+            // Existing asset found: mark modified so MovieSceneToolHelpers can overwrite it
+            NewAnim->Modify();
+
+            // Clear curves from the data model so ExportToAnimSequence doesn't log duplicates
+            if (NewAnim->GetDataModel())
+            {
+                IAnimationDataController& Controller = NewAnim->GetController();
+                Controller.OpenBracket(FText::FromString(TEXT("ResetCurvesForBake")));
+                Controller.RemoveAllCurvesOfType(ERawCurveTrackTypes::RCT_Float);
+                Controller.RemoveAllCurvesOfType(ERawCurveTrackTypes::RCT_Transform);
+                Controller.CloseBracket();
+            }
+        }
     }
 
     if (!NewAnim)
@@ -2036,6 +2058,7 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
 
     NewAnim->MarkPackageDirty();
     Result.bSuccess = true;
+    SaveAsset(NewAnim);
     return true;
 #endif // WITH_EDITOR
 }
