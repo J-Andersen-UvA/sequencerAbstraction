@@ -132,12 +132,14 @@ void USectionAbstraction::SetAnimationAsset(
 
 FSectionLabelEntry USectionAbstraction::CreateSectionLabelEntry(
 	UMovieSceneSection* Section,
-	const FString& Label)
+	const FString& Label,
+    int32 GlossIndex)
 {
 	FSectionLabelEntry Entry;
 
 	Entry.Section = Section;
 	Entry.Label = Label;
+    Entry.GlossIndex = GlossIndex;
 
 	return Entry;
 }
