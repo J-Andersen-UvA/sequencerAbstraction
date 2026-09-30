@@ -2003,18 +2003,6 @@ bool USequencerAbstractionBPLibrary::BakeBindingToAnimSequence(
             }
         }
     }
-    // {
-    //     FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-    //     IAssetTools& AssetTools = AssetToolsModule.Get();
-
-    //     UAnimSequenceFactory* Factory = NewObject<UAnimSequenceFactory>();
-    //     Factory->TargetSkeleton = SkelComp->GetSkeletalMeshAsset()->GetSkeleton();
-
-    //     // Folder must be /Game/... style. Assume caller passes that.
-    //     NewAnim = Cast<UAnimSequence>(
-    //         AssetTools.CreateAsset(*NewAssetName, *CleanPath, UAnimSequence::StaticClass(), Factory)
-    //     );
-    // }
 
     if (!NewAnim)
     {
