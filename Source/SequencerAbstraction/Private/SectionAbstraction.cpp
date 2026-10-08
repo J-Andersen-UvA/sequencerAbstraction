@@ -11,46 +11,50 @@
 void USectionAbstraction::MatchSectionByBone(UMovieSceneSkeletalAnimationSection* CurrentSection, USkeletalMeshComponent* SkelMeshComp, FFrameTime CurrentFrame, FFrameRate FrameRate,
     FName BoneName)
 {   
-    if (!CurrentSection || !SkelMeshComp)
+   if (!CurrentSection || !SkelMeshComp)
     {
         UE_LOG(LogTemp, Warning, TEXT("[SectionAbstraction] Invalid CurrentSection or SkelMeshComp passed to MatchSectionByBone."));
         return;
     }
 
     CurrentSection->Modify();
+
+    // 1. Assign target bone
     CurrentSection->MatchedBoneName = BoneName;
 
-    UMovieSceneCommonAnimationTrack* Track = CurrentSection->GetTypedOuter<UMovieSceneCommonAnimationTrack>();
-    if (!Track)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[SectionAbstraction] CurrentSection has no valid UMovieSceneCommonAnimationTrack outer."));
-        return;
-    }
+    // 2. Translation & Z matching
+    CurrentSection->bMatchTranslation = true;
+    CurrentSection->bMatchIncludeZHeight = true;
 
-    FTransform DiffTransform;
-    FVector DiffTranslate;
-    FQuat DiffRotate;
+    // 3. Rotation matching (Yaw, Pitch, and Roll)
+    CurrentSection->bMatchRotationYaw = true;
+    CurrentSection->bMatchRotationPitch = true;
+    CurrentSection->bMatchRotationRoll = true;
 
+    // 4. Ensure CurrentFrame and FrameRate are in TickResolution
     UMovieScene* MovieScene = CurrentSection->GetTypedOuter<UMovieScene>();
     if (MovieScene)
     {
-        FFrameRate TickResolution = MovieScene->GetTickResolution();
-        CurrentFrame = FFrameRate::TransformTime(CurrentFrame, FrameRate, TickResolution);
-        FrameRate = TickResolution;
+        const FFrameRate TickResolution = MovieScene->GetTickResolution();
+        if (FrameRate != TickResolution)
+        {
+            CurrentFrame = FFrameRate::TransformTime(CurrentFrame, FrameRate, TickResolution);
+            FrameRate = TickResolution;
+        }
     }
 
-    Track->MatchSectionByBoneTransform(true, SkelMeshComp, CurrentSection, CurrentFrame, FrameRate, BoneName, DiffTransform, DiffTranslate, DiffRotate);
+    // 5. Calculate & apply the full delta transform
+    CurrentSection->MatchSectionByBoneTransform(SkelMeshComp, CurrentFrame, FrameRate, BoneName);
 
-    CurrentSection->MatchedLocationOffset = CurrentSection->bMatchTranslation ? DiffTranslate : FVector::ZeroVector;
-    CurrentSection->MatchedRotationOffset = DiffRotate.Rotator();
-
-
-    // Invalidate root motion cache
+    // 6. Invalidate root motion cache
     if (CurrentSection->GetRootMotionParams())
     {
         CurrentSection->GetRootMotionParams()->bRootMotionsDirty = true;
     }
+
+    CurrentSection->MarkAsChanged();
 }
+
 
 void USectionAbstraction::SplitAnimationSection(
     UMovieSceneSection* Section,
