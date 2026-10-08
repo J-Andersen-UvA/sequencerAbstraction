@@ -2215,7 +2215,8 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
 
     MovieScene->Modify();
     Section->Modify();
-    
+    Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
+
     // Notify parent track to recalculate overlapping sections and easing
     UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
 
@@ -2225,8 +2226,6 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionStartTo(
 		ParentTrack->MarkAsChanged();
 		ParentTrack->UpdateEasing();
     }
-
-    Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
 
     Sequence->MarkPackageDirty();
     Result.bSuccess = true;
@@ -2286,6 +2285,7 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
 
     MovieScene->Modify();
     Section->Modify();
+    Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
 
 	// Notify parent track to recalculate overlapping sections and easing
     UMovieSceneTrack* ParentTrack = Section->GetTypedOuter<UMovieSceneTrack>();
@@ -2297,12 +2297,9 @@ bool USequencerAbstractionBPLibrary::MoveAnimationSectionEndTo(
         ParentTrack->UpdateEasing();
     }
 
-    Section->SetRange(TRange<FFrameNumber>(NewStartTick, NewEndTickEx));
-
     Sequence->MarkPackageDirty();
     Result.bSuccess = true;
     return true;
-
 }
 
 bool USequencerAbstractionBPLibrary::RemoveAllKeysForControlExceptFrame(
