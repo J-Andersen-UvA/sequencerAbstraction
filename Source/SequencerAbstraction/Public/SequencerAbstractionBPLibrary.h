@@ -166,6 +166,20 @@ public:
         float& OutValue,
         FString& ErrorMessage);
 
+    UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|ControlRig",
+        meta = (DisplayName = "Set Local Control Rig Float Key Throttled", CPP_Default_TimeUnit = "DisplayRate", CPP_Default_bForceKey = "false", ClampMin = "0.0"))
+    static bool setLocalControlRigFloatKeyThrottled(
+        ULevelSequence* LevelSequence,
+        UControlRig* ControlRig,
+        FName ControlName,
+        FFrameNumber Frame,
+        float Value,
+        EMovieSceneTimeUnit TimeUnit,
+        float DeltaSeconds,
+        bool bForceKey,
+        bool& bKeyWasSet,
+        FString& ErrorMessage);
+
     UFUNCTION(BlueprintCallable, Category = "SequencerAbstraction|Sequencer")
     static TArray<FSequenceTrackInfo> GetAllTracksInCurrentSequence();
 

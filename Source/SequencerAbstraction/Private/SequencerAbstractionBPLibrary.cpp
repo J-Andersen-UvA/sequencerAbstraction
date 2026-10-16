@@ -68,6 +68,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "HAL/PlatformTime.h"
 #include "UObject/UnrealType.h"
 
 static FString MakeMasterTrackKey(UMovieSceneTrack* Track, int32 Index)
@@ -82,6 +83,28 @@ static FString MakeBindingTrackKey(const FGuid& Guid, UMovieSceneTrack* Track, i
 
 namespace
 {
+    struct FThrottledControlKey
+    {
+        TWeakObjectPtr<ULevelSequence> Sequence;
+        TWeakObjectPtr<UControlRig> ControlRig;
+        FName ControlName;
+
+        bool operator==(const FThrottledControlKey& Other) const
+        {
+            return Sequence == Other.Sequence &&
+                ControlRig == Other.ControlRig &&
+                ControlName == Other.ControlName;
+        }
+
+        friend uint32 GetTypeHash(const FThrottledControlKey& Key)
+        {
+            return HashCombine(
+                HashCombine(GetTypeHash(Key.Sequence), GetTypeHash(Key.ControlRig)),
+                GetTypeHash(Key.ControlName));
+        }
+    };
+
+    TMap<FThrottledControlKey, double> LastThrottledControlKeyTimes;
     TWeakObjectPtr<ULevelSequence> LastSequencerTimeSequence;
     FFrameTime LastSequencerTime;
     bool bHasLastSequencerTime = false;
@@ -326,6 +349,93 @@ bool USequencerAbstractionBPLibrary::GetCurrentFloatValueFromRigBindingProxy(
         *ControlName.ToString());
     return false;
 
+#endif
+}
+
+bool USequencerAbstractionBPLibrary::setLocalControlRigFloatKeyThrottled(
+    ULevelSequence* LevelSequence,
+    UControlRig* ControlRig,
+    FName ControlName,
+    FFrameNumber Frame,
+    float Value,
+    EMovieSceneTimeUnit TimeUnit,
+    float DeltaSeconds,
+    bool bForceKey,
+    bool& bKeyWasSet,
+    FString& ErrorMessage)
+{
+#if !WITH_EDITOR
+    bKeyWasSet = false;
+    ErrorMessage = TEXT("Editor only.");
+    return false;
+#else
+    bKeyWasSet = false;
+    ErrorMessage.Empty();
+
+    if (!LevelSequence || !LevelSequence->GetMovieScene())
+    {
+        ErrorMessage = TEXT("Level Sequence or MovieScene is null.");
+        return false;
+    }
+
+    if (!ControlRig)
+    {
+        ErrorMessage = TEXT("Control Rig is null.");
+        return false;
+    }
+
+    const FRigControlElement* ControlElement = ControlRig->FindControl(ControlName);
+    if (!ControlElement)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("Control Rig does not contain control '%s'."),
+            *ControlName.ToString());
+        return false;
+    }
+
+    const ERigControlType ControlType = ControlElement->Settings.ControlType;
+    if (ControlType != ERigControlType::Float && ControlType != ERigControlType::ScaleFloat)
+    {
+        ErrorMessage = FString::Printf(
+            TEXT("Control '%s' is not a float control."),
+            *ControlName.ToString());
+        return false;
+    }
+
+    if (DeltaSeconds < 0.0f)
+    {
+        ErrorMessage = TEXT("Delta Seconds cannot be negative.");
+        return false;
+    }
+
+    for (auto Iterator = LastThrottledControlKeyTimes.CreateIterator(); Iterator; ++Iterator)
+    {
+        if (!Iterator.Key().Sequence.IsValid() || !Iterator.Key().ControlRig.IsValid())
+        {
+            Iterator.RemoveCurrent();
+        }
+    }
+
+    const FThrottledControlKey ThrottleKey{LevelSequence, ControlRig, ControlName};
+    const double CurrentTime = FPlatformTime::Seconds();
+    const double* LastKeyTime = LastThrottledControlKeyTimes.Find(ThrottleKey);
+    if (!bForceKey && LastKeyTime && CurrentTime - *LastKeyTime < DeltaSeconds)
+    {
+        return true;
+    }
+
+    UControlRigSequencerEditorLibrary::SetLocalControlRigFloat(
+        LevelSequence,
+        ControlRig,
+        ControlName,
+        Frame,
+        Value,
+        TimeUnit,
+        true);
+
+    LastThrottledControlKeyTimes.Add(ThrottleKey, CurrentTime);
+    bKeyWasSet = true;
+    return true;
 #endif
 }
 
