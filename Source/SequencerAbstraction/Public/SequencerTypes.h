@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "MovieSceneObjectBindingID.h"
 #include "UObject/ObjectMacros.h"
 #include "SequencerTypes.generated.h"
 
